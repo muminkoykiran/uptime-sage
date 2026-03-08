@@ -25,7 +25,7 @@ Telegram Chat / Grup / Kanal
 
 ## Gereksinimler
 
-- Node.js v18+
+- Node.js v20.11+ (`import.meta.dirname` gerektiriyor)
 - [Codex CLI](https://github.com/openai/codex) kurulu ve yapilandirilmis
 - Uptime Kuma instance
 - Telegram Bot Token
@@ -75,7 +75,13 @@ node scripts/get-jwt-token.js <username> <password>
 
 ### 6. Saatlik zamanla
 
-**macOS (LaunchAgent — onerilen):**
+**Ubuntu / Linux (systemd — onerilen):**
+
+```bash
+bash scripts/setup-systemd.sh
+```
+
+**macOS (LaunchAgent):**
 
 ```bash
 bash scripts/setup-launchd.sh
@@ -85,6 +91,30 @@ bash scripts/setup-launchd.sh
 
 ```bash
 bash scripts/setup-cron.sh
+```
+
+## Ubuntu Kurulumu (Hizli Referans)
+
+```bash
+# Node.js 22 LTS kur (NodeSource)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# node versiyonunu dogrula (>=20.11 olmali)
+node --version
+
+# Codex CLI kur
+npm install -g @openai/codex
+
+# Repoyu klon
+git clone https://github.com/muminkoykiran/uptime-sage.git
+cd uptime-sage
+npm install
+
+# Yapilandir ve baslat
+cp .env.example .env
+# .env dosyasini doldur
+bash scripts/setup-systemd.sh
 ```
 
 ## Codex CLI ile Kullanim
@@ -135,8 +165,9 @@ uptime-resilience-agent/
     resilience-analysis.md         # SRE analiz skill
     telegram-dispatch.md           # Telegram bildirim skill
   scripts/
+    setup-systemd.sh               # Ubuntu/Linux systemd zamanlama
     setup-launchd.sh               # macOS saatlik zamanlama
-    setup-cron.sh                  # Cron zamanlama
+    setup-cron.sh                  # Cron zamanlama (evrensel)
     get-jwt-token.js               # Uptime Kuma JWT token alma
   config/
     analysis-schema.json           # Codex exec JSON schema
@@ -154,7 +185,16 @@ uptime-resilience-agent/
 
 CI/CD entegrasyonu icin exit code kullanilabilir.
 
-## Log Takibi (LaunchAgent)
+## Log Takibi
+
+**Ubuntu / Linux (systemd):**
+
+```bash
+tail -f ~/.local/log/uptime-resilience-agent/stdout.log
+tail -f ~/.local/log/uptime-resilience-agent/stderr.log
+```
+
+**macOS (LaunchAgent):**
 
 ```bash
 tail -f ~/Library/Logs/uptime-resilience-agent/stdout.log
@@ -166,4 +206,5 @@ tail -f ~/Library/Logs/uptime-resilience-agent/stderr.log
 - [x] Socket.IO ile JWT kimlik dogrulama (tam monitor erisimi)
 - [x] Severity bazli farkli Telegram kanallarina eskalasyon (`TELEGRAM_CRITICAL_CHAT_ID`)
 - [x] Tekrar alert onleme — state yonetimi ile yapilandirilabilir re-alert araligi
+- [x] Ubuntu / Linux systemd timer destegi
 - [ ] Socket.IO ile monitor durdurma/baslatma aksiyonu (`pauseMonitor` / `resumeMonitor`)
