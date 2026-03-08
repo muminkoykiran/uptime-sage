@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UptimeResilienceAnalysis",
+  "description": "Codex exec --output-schema icin JSON schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["severity", "healthScore", "summary", "telegramMessage", "criticalIssues", "warnings", "actions", "detailedReport"],
+  "properties": {
+    "severity": {
+      "type": "string",
+      "enum": ["CRITICAL", "WARNING", "OK"],
+      "description": "Genel sistem severity seviyesi"
+    },
+    "healthScore": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Genel saglik skoru 0-100"
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Kisa ozet (2-3 cumle)"
+    },
+    "criticalIssues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["monitor", "issue", "impact", "action"],
+        "properties": {
+          "monitor": { "type": "string" },
+          "issue": { "type": "string", "maxLength": 300 },
+          "impact": { "type": "string", "maxLength": 200 },
+          "action": { "type": "string", "maxLength": 300 }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["monitor", "issue", "recommendation"],
+        "properties": {
+          "monitor": { "type": "string" },
+          "issue": { "type": "string", "maxLength": 300 },
+          "recommendation": { "type": "string", "maxLength": 300 }
+        }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["priority", "description", "command"],
+        "properties": {
+          "priority": { "type": "string", "enum": ["HIGH", "MED", "LOW"] },
+          "description": { "type": "string", "maxLength": 300 },
+          "command": { "type": "string", "maxLength": 500 }
+        }
+      }
+    },
+    "telegramMessage": {
+      "type": "string",
+      "maxLength": 3800,
+      "description": "Telegram'a gonderilecek Markdown mesaji"
+    },
+    "detailedReport": {
+      "type": "string",
+      "maxLength": 6000,
+      "description": "Detayli teknik rapor"
+    }
+  }
+}
