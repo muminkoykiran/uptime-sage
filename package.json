@@ -1,0 +1,21 @@
+{
+  "name": "uptime-resilience-agent",
+  "version": "1.0.0",
+  "description": "Codex CLI tabanlı Uptime Kuma resilience izleme ve Telegram bildirim ajani",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test:uptime": "node -e \"import('./src/uptime.js').then(m => m.fetchStatusPageList().then(d => console.log(JSON.stringify(d,null,2))))\"",
+    "test:dry": "node src/index.js --dry --debug",
+    "test:live": "node src/index.js --debug",
+    "codex:run": "codex exec --ephemeral --skip-git-repo-check --sandbox read-only --output-schema config/analysis-schema.json \"Uptime Kuma monitor durumunu analiz et ve Telegram bildirimi gonder\"",
+    "codex:dry": "codex exec --ephemeral --skip-git-repo-check --sandbox read-only --output-schema config/analysis-schema.json \"Uptime Kuma monitor durumunu analiz et, sadece rapor uret Telegram gonderme\""
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.3"
+  }
+}
