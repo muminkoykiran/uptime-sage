@@ -128,5 +128,6 @@ node src/index.js --debug
 - `main` branch'ine direkt push yapilmaz — her zaman PR veya release merge ile gelir
 - `.env` dosyasi asla commit edilmez
 - ESM (import/export) kullanilir, `require()` kullanilmaz
+- Node.js v20.11+ gereklidir (`import.meta.dirname` zorunluluğu)
 - Native `fetch` kullanilir, harici HTTP kutuphanesi eklenmez
 - Yeni ozellikler `.codex/skills/` altina skill dosyasi ile dokumante edilir

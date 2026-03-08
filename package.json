@@ -4,7 +4,7 @@
   "description": "Codex CLI tabanlı Uptime Kuma resilience izleme ve Telegram bildirim ajani",
   "type": "module",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.11.0"
   },
   "scripts": {
     "start": "node src/index.js",

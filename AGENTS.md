@@ -7,7 +7,7 @@ Codex CLI tabanli, Uptime Kuma izleme sistemi icin uzman SRE resilience ajani.
 - Uptime Kuma public status page API'sinden monitor verisi ceker
 - Codex CLI ile SRE perspektifinden analiz yapar
 - Telegram uzerinden akilli bildirimler gonderir
-- Her saat otomatik calisir (macOS launchd veya cron)
+- Her saat otomatik calisir (systemd / launchd / cron)
 - Kritik durumlarda aksiyon onerileri uretir
 
 ## Dizin Yapisi
@@ -27,8 +27,9 @@ src/
   telegram-dispatch.md    - Telegram bildirim skill'i
 
 scripts/
+  setup-systemd.sh  - Ubuntu/Linux systemd timer kurulum scripti (saatlik)
   setup-launchd.sh  - macOS launchd kurulum scripti (saatlik)
-  setup-cron.sh     - Cron job kurulum scripti
+  setup-cron.sh     - Cron job kurulum scripti (evrensel)
   get-jwt-token.js  - Uptime Kuma JWT token alma araci
 
 config/
@@ -42,7 +43,7 @@ README.md
 ## Gelistirme Kurallari
 
 - ESM (import/export) kullan, require() kullanma
-- Node.js v18+ native fetch kullan, axios/node-fetch ekleme
+- Node.js v20.11+ native fetch kullan, axios/node-fetch ekleme
 - Tum log mesajlari `[HH:MM:SS]` prefix ile
 - Hata durumunda Telegram'a da hata bildirimi gonder
 - Yeni ozellikler .codex/skills/ altina SKILL.md ile dokumante edilmeli
@@ -84,7 +85,8 @@ node src/index.js           # tek seferlik manuel calistirma
 node src/index.js --dry     # Telegram gondermeden test
 node src/index.js --debug   # Detayli log
 
-scripts/setup-launchd.sh    # macOS saatlik zamanlamali calistirma
+scripts/setup-systemd.sh    # Ubuntu/Linux systemd timer ile saatlik calistirma
+scripts/setup-launchd.sh    # macOS launchd ile saatlik calistirma
 scripts/setup-cron.sh       # Linux/macOS cron ile saatlik calistirma
 ```
 
