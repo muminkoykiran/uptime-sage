@@ -47,6 +47,7 @@ WorkingDirectory=${AGENT_DIR}
 ExecStart=${NODE_PATH} ${AGENT_DIR}/src/index.js
 StandardOutput=append:${LOG_DIR}/stdout.log
 StandardError=append:${LOG_DIR}/stderr.log
+SuccessExitStatus=0 1 2 3
 EOF
 
 # systemd .timer unit (her saat basinda)
