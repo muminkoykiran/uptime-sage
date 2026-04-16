@@ -22,7 +22,7 @@ src/uptime.js → src/analyzer.js → src/telegram.js
 
 1. **`src/uptime.js`** — fetches monitor data. If `UPTIME_KUMA_TOKEN` is set, uses Socket.IO (`connectSocketIO` + `fetchAllMonitors`). Otherwise falls back to public HTTP (`fetchStatusPageList` → `fetchPublicStatus` → `parsePublicMonitors`). Always returns the same shape via `aggregateStats`.
 
-2. **`src/analyzer.js`** — shells out to `codex exec --json --sandbox read-only --output-schema config/analysis-schema.json --output-last-message <tmpfile>`. Parses response in three tiers: temp file first, then JSONL event stream (`turn.completed` / `item.completed`), then raw stdout scan. Falls back to `buildFallbackAnalysis()` if Codex is unavailable.
+2. **`src/analyzer.js`** — shells out to `codex exec --json --sandbox read-only --output-schema config/analysis-schema.json --output-last-message <tmpfile>` via a custom `spawnAsync` helper that uses `stdio: ['ignore', 'pipe', 'pipe']`. **Do not replace this with `execFile`/`execFileAsync`** — Node 22's `input` option does not reliably close the child's stdin pipe, causing Codex to block waiting for EOF indefinitely. With stdin ignored, Codex detects EOF immediately and proceeds. Parses response in three tiers: temp file first, then JSONL event stream (`turn.completed` / `item.completed`), then raw stdout scan. Falls back to `buildFallbackAnalysis()` if Codex is unavailable.
 
 3. **`src/telegram.js`** — sends via Bot API. Routes to `TELEGRAM_CRITICAL_CHAT_ID` / `TELEGRAM_WARNING_CHAT_ID` by severity, falls back to `TELEGRAM_CHAT_ID`. Splits messages >4000 chars, retries on 429/5xx.
 
