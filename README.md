@@ -119,12 +119,12 @@ bash scripts/setup-systemd.sh
 
 ## Codex CLI ile Kullanim
 
-Bu proje Codex CLI icin tam optimize edilmistir (`AGENTS.md` + `.codex/skills/`).
+Bu proje Codex CLI icin tam optimize edilmistir (`AGENTS.md` + `.agents/skills/`).
 
 ### Interaktif mod
 
 ```bash
-cd /path/to/uptime-resilience-agent
+cd /path/to/uptime-sage
 codex
 # > "analyzer.js'deki promptu daha iyi SRE pratikleri icin optimize et"
 # > "Telegram mesajina uptime grafiklerini de ekle"
@@ -151,8 +151,9 @@ codex exec --json --sandbox read-only --ephemeral \
 ## Proje Yapisi
 
 ```
-uptime-resilience-agent/
+uptime-sage/
   AGENTS.md                        # Codex CLI proje talimatlari
+  CLAUDE.md                        # Claude Code rehberi
   src/
     index.js                       # Ana giris / orkestrasyon
     uptime.js                      # Uptime Kuma API istemcisi
@@ -160,10 +161,14 @@ uptime-resilience-agent/
     telegram.js                    # Telegram Bot istemcisi
     state.js                       # Alert state yonetimi
     env.js                         # .env yukleyici
-  .codex/skills/
-    uptime-monitor.md              # Uptime Kuma sorgulama skill
-    resilience-analysis.md         # SRE analiz skill
-    telegram-dispatch.md           # Telegram bildirim skill
+  .agents/skills/
+    uptime-monitor/                # Uptime Kuma sorgulama skill
+    resilience-analysis/           # SRE analiz skill
+    telegram-dispatch/             # Telegram bildirim skill
+  .codex/
+    config.toml                    # Codex proje konfigurasyonu
+    hooks.json                     # SessionStart / Stop hooks
+    hook-scripts/                  # Hook implementasyonlari
   scripts/
     setup-systemd.sh               # Ubuntu/Linux systemd zamanlama
     setup-launchd.sh               # macOS saatlik zamanlama
