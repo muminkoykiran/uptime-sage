@@ -1,9 +1,8 @@
 /**
  * Stop hook — Codex oturumu tamamlandiginda veya beklenmedik sekilde kapandiginda calisir.
- * Son asistan mesajini loglar. CRITICAL durumunda Telegram'a dogrudan bildirim gonderir.
+ * CRITICAL durumunda Telegram'a dogrudan bildirim gonderir (Codex exec crash fallback).
  */
 
-import { readFileSync } from 'node:fs';
 
 let input = '';
 for await (const chunk of process.stdin) input += chunk;
@@ -23,7 +22,7 @@ if (isCritical && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID
     await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: process.env.TELEGRAM_CHAT_ID, text, parse_mode: '' }),
+      body: JSON.stringify({ chat_id: process.env.TELEGRAM_CHAT_ID, text }),
       signal: AbortSignal.timeout(8000),
     });
   } catch { /* hook hatalari sessizce gecilir */ }

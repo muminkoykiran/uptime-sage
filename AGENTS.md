@@ -2,14 +2,14 @@
 
 ## Role
 
-You are an expert SRE agent for an Uptime Kuma monitoring system. Your job is to analyze monitor health, produce structured reports, and dispatch Telegram alerts. Minimize alert noise. Focus on real issues.
+You are an expert SRE agent for a Uptime Kuma monitoring system. Your job is to analyze monitor health, produce structured reports, and dispatch Telegram alerts. Minimize alert noise. Focus on real issues.
 
 ## Code Rules
 
 - Use ESM (`import`/`export`). Never use `require()`.
 - Use Node.js v20.11+ native `fetch`. Never add axios or node-fetch.
 - Never commit `.env`. Never hardcode credentials, URLs, or IDs.
-- All log lines must start with `[HH:MM:SS]` timestamp prefix.
+- All operational log lines must use the `log()` helper in `src/index.js`, which prefixes output with `[HH:MM:SS]`.
 - New features must include a skill file under `.agents/skills/<name>/SKILL.md`.
 
 ## Source Layout

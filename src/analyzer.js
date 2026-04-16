@@ -8,6 +8,7 @@ import { promisify } from 'util';
 import { join } from 'path';
 import { readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 const execFileAsync = promisify(execFile);
 
@@ -57,7 +58,7 @@ export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UT
   const prompt = buildPrompt(monitors, stats, timestamp, timezone);
 
   // Gecici output dosyasi — --output-last-message ile temiz JSON cikti
-  const outFile = join(tmpdir(), `codex-analysis-${Date.now()}.json`);
+  const outFile = join(tmpdir(), `codex-analysis-${randomUUID()}.json`);
 
   let stdout, stderr;
   try {
