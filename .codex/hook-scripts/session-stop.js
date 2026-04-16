@@ -3,7 +3,6 @@
  * CRITICAL durumunda Telegram'a dogrudan bildirim gonderir (Codex exec crash fallback).
  */
 
-
 let input = '';
 for await (const chunk of process.stdin) input += chunk;
 

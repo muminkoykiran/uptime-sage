@@ -6,10 +6,8 @@ on:
   pull_request:
     branches: [main, develop]
 
-# Deny all permissions by default; grant only what each job needs.
 permissions: {}
 
-# Cancel in-progress runs for the same ref (saves minutes, avoids stale feedback).
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -36,18 +34,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Syntax check — src
+      - name: Syntax check
         run: |
-          for f in src/*.js; do
-            node --check "$f" && echo "OK: $f"
-          done
-
-      - name: Syntax check — scripts & hooks
-        run: |
-          for f in scripts/*.js .codex/hook-scripts/*.js .agents/skills/uptime-monitor/scripts/*.js; do
+          for f in src/*.js scripts/*.js .codex/hook-scripts/*.js .agents/skills/uptime-monitor/scripts/*.js; do
             [ -f "$f" ] && node --check "$f" && echo "OK: $f"
           done
 
       - name: Security audit
-        # Fail on high/critical vulnerabilities only; informational findings are noise.
         run: npm audit --audit-level=high
