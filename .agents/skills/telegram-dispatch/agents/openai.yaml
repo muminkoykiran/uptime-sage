@@ -1,0 +1,6 @@
+interface:
+  display_name: "Telegram Dispatch"
+  short_description: "Send Telegram alerts with severity-based channel routing"
+
+policy:
+  allow_implicit_invocation: false

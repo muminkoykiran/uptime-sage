@@ -1,0 +1,54 @@
+name: Codex Code Review
+
+on:
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    name: Codex Review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax check
+        run: |
+          for f in src/*.js scripts/get-jwt-token.js; do
+            node --check "$f" && echo "OK: $f"
+          done
+
+      - name: Codex Review
+        uses: openai/codex-action@v1
+        with:
+          prompt: |
+            Review this pull request for the Uptime Resilience Agent project.
+            Check for:
+            1. Security issues (hardcoded credentials, injection risks)
+            2. Node.js ESM correctness (no require(), native fetch only)
+            3. Error handling completeness (all async paths covered)
+            4. Consistency with existing patterns in src/
+            5. Any breaking changes to the analysis pipeline or Telegram dispatch
+
+            Be concise. Flag only real issues, not style preferences.
+          sandbox: "read-only"
+          model: "gpt-5.4"
+          effort: "high"
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

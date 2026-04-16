@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hook-scripts/session-start.js",
+            "statusMessage": "Loading monitor state",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hook-scripts/session-stop.js",
+            "statusMessage": "Saving session context",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
