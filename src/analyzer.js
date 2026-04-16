@@ -6,20 +6,59 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
+import { readFileSync, unlinkSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 const execFileAsync = promisify(execFile);
 
-// FIX: import.meta.dirname (Node 20.11+) — __dirname shim gereksiz
 const ROOT = join(import.meta.dirname, '..');
-const SCHEMA_PATH = join(ROOT, 'config', 'analysis-schema.json'); // module-level constant
+const SCHEMA_PATH = join(ROOT, 'config', 'analysis-schema.json');
 
 function isValidAnalysis(obj) {
   return obj && obj.severity && obj.healthScore !== undefined && obj.telegramMessage;
 }
 
+// --json modunda JSONL event stream'den structured output'u parse eder.
+// turn.completed event'indeki output alani JSON schema ciktiyi icerir.
+function parseJsonlOutput(stdout) {
+  const lines = stdout.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line.startsWith('{')) continue;
+    try {
+      const event = JSON.parse(line);
+      // turn.completed → output field contains the schema-validated JSON string
+      if (event.type === 'turn.completed' && event.output) {
+        try {
+          const parsed = JSON.parse(event.output);
+          if (isValidAnalysis(parsed)) return parsed;
+        } catch { /* output might not be JSON directly */ }
+      }
+      // item.completed with assistant message content
+      if (event.type === 'item.completed' && event.item?.content) {
+        for (const block of (Array.isArray(event.item.content) ? event.item.content : [])) {
+          if (block.type === 'text' || block.type === 'output_text') {
+            try {
+              const parsed = JSON.parse(block.text ?? block.value ?? '');
+              if (isValidAnalysis(parsed)) return parsed;
+            } catch { /* not JSON */ }
+          }
+        }
+      }
+      // Direct JSON object in event stream (--output-schema response)
+      if (isValidAnalysis(event)) return event;
+    } catch { /* not valid JSON */ }
+  }
+  return null;
+}
+
 export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UTC') {
   const codexBin = process.env.CODEX_BIN || 'codex';
   const prompt = buildPrompt(monitors, stats, timestamp, timezone);
+
+  // Gecici output dosyasi — --output-last-message ile temiz JSON cikti
+  const outFile = join(tmpdir(), `codex-analysis-${randomUUID()}.json`);
 
   let stdout, stderr;
   try {
@@ -27,13 +66,15 @@ export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UT
       codexBin,
       [
         'exec',
+        '--json',
         '--ephemeral',
         '--skip-git-repo-check',
         '--sandbox', 'read-only',
         '--output-schema', SCHEMA_PATH,
+        '--output-last-message', outFile,
         prompt,
       ],
-      { cwd: ROOT, timeout: 120_000, maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL' }
+      { cwd: ROOT, timeout: 120_000, maxBuffer: 8 * 1024 * 1024, killSignal: 'SIGKILL' }
     ));
   } catch (err) {
     const detail = [
@@ -43,34 +84,50 @@ export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UT
     ].filter(Boolean).join(' | ');
 
     console.error(`codex exec hatasi: ${detail}`);
+    cleanupTmpFile(outFile);
     return buildFallbackAnalysis(stats);
   }
 
-  const raw = stdout.trim();
-  if (!raw) {
-    console.error(`codex exec bos yanit donurdu. Stderr: ${stderr?.slice(0, 300)}`);
-    return buildFallbackAnalysis(stats);
-  }
-
-  // Line-based JSON parse: iterate from end, try JSON.parse on each line
-  const lines = raw.split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line.startsWith('{')) continue;
+  // 1. Oncelik: --output-last-message dosyasi (en guvenilir)
+  if (existsSync(outFile)) {
     try {
-      const parsed = JSON.parse(line);
-      if (isValidAnalysis(parsed)) return parsed;
-    } catch { /* not valid JSON, try previous line */ }
+      const fileContent = readFileSync(outFile, 'utf8').trim();
+      cleanupTmpFile(outFile);
+      if (fileContent) {
+        const parsed = JSON.parse(fileContent);
+        if (isValidAnalysis(parsed)) return parsed;
+      }
+    } catch { /* dosya parse edilemedi, JSONL'e fallback */ }
   }
 
-  // Fallback: try parsing entire output
-  try {
-    const parsed = JSON.parse(raw);
-    if (isValidAnalysis(parsed)) return parsed;
-  } catch { /* not valid JSON */ }
+  cleanupTmpFile(outFile);
 
-  console.error(`Gecerli JSON bulunamadi. Cikti: ${raw.slice(0, 300)}`);
+  // 2. --json JSONL event stream parse
+  const raw = stdout.trim();
+  if (raw) {
+    const fromJsonl = parseJsonlOutput(raw);
+    if (fromJsonl) return fromJsonl;
+  }
+
+  // 3. Son care: ham stdout'u duz JSON olarak dene
+  if (raw) {
+    const lines = raw.split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line.startsWith('{')) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (isValidAnalysis(parsed)) return parsed;
+      } catch { /* devam */ }
+    }
+  }
+
+  console.error(`Gecerli analiz JSON bulunamadi. Stderr: ${stderr?.slice(0, 300) ?? ''}`);
   return buildFallbackAnalysis(stats);
+}
+
+function cleanupTmpFile(path) {
+  try { if (existsSync(path)) unlinkSync(path); } catch { /* sessizce gec */ }
 }
 
 function buildFallbackAnalysis(stats) {

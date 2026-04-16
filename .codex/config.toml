@@ -1,0 +1,11 @@
+model                  = "gpt-5.4"
+model_reasoning_effort = "high"
+approval_policy        = "never"
+sandbox_mode           = "read-only"
+
+[features]
+codex_hooks = true
+
+[agents]
+max_threads = 2
+max_depth   = 2

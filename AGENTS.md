@@ -1,112 +1,66 @@
-# Uptime Resilience Agent — AGENTS.md
+# Uptime Resilience Agent — Operating Instructions
 
-Codex CLI tabanli, Uptime Kuma izleme sistemi icin uzman SRE resilience ajani.
+## Role
 
-## Proje Amaci
+You are an expert SRE agent for a Uptime Kuma monitoring system. Your job is to analyze monitor health, produce structured reports, and dispatch Telegram alerts. Minimize alert noise. Focus on real issues.
 
-- Uptime Kuma public status page API'sinden monitor verisi ceker
-- Codex CLI ile SRE perspektifinden analiz yapar
-- Telegram uzerinden akilli bildirimler gonderir
-- Her saat otomatik calisir (systemd / launchd / cron)
-- Kritik durumlarda aksiyon onerileri uretir
+## Code Rules
 
-## Dizin Yapisi
+- Use ESM (`import`/`export`). Never use `require()`.
+- Use Node.js v20.11+ native `fetch`. Never add axios or node-fetch.
+- Never commit `.env`. Never hardcode credentials, URLs, or IDs.
+- All operational log lines must use the `log()` helper in `src/index.js`, which prefixes output with `[HH:MM:SS]`.
+- New features must include a skill file under `.agents/skills/<name>/SKILL.md`.
 
-```
-src/
-  index.js      - Ana giris noktasi, orkestrasyonu yonetir
-  uptime.js     - Uptime Kuma API istemcisi (Socket.IO + public HTTP)
-  analyzer.js   - Codex CLI exec ile AI analiz motoru
-  telegram.js   - Telegram Bot API istemcisi
-  state.js      - Alert durumu ve tekrar alert yonetimi
-  env.js        - .env dosyasindan ortam degiskeni yukleyici
-
-.codex/skills/
-  uptime-monitor.md       - Uptime Kuma sorgulama skill'i
-  resilience-analysis.md  - Resilience analiz skill'i
-  telegram-dispatch.md    - Telegram bildirim skill'i
-
-scripts/
-  setup-systemd.sh  - Ubuntu/Linux systemd timer kurulum scripti (saatlik)
-  setup-launchd.sh  - macOS launchd kurulum scripti (saatlik)
-  setup-cron.sh     - Cron job kurulum scripti (evrensel)
-  get-jwt-token.js  - Uptime Kuma JWT token alma araci
-
-config/
-  analysis-schema.json    - Codex exec JSON schema
-
-.env.example    - Ortam degiskeni sablonu
-package.json
-README.md
-```
-
-## Gelistirme Kurallari
-
-- ESM (import/export) kullan, require() kullanma
-- Node.js v20.11+ native fetch kullan, axios/node-fetch ekleme
-- Tum log mesajlari `[HH:MM:SS]` prefix ile
-- Hata durumunda Telegram'a da hata bildirimi gonder
-- Yeni ozellikler .codex/skills/ altina SKILL.md ile dokumante edilmeli
-- .env dosyasi asla commit edilmemeli
-
-## Ortam Degiskenleri (Zorunlu)
+## Source Layout
 
 ```
-UPTIME_KUMA_URL      - Uptime Kuma instance adresi (orn: https://uptime.yourdomain.com)
-TELEGRAM_BOT_TOKEN   - @BotFather'dan alinan bot tokeni
-TELEGRAM_CHAT_ID     - Mesajin gidecegi chat/kanal/grup ID'si
+src/index.js      Orchestration entry point — run this to start the agent
+src/uptime.js     Uptime Kuma client (Socket.IO+JWT primary, HTTP fallback)
+src/analyzer.js   Codex exec engine — produces structured JSON analysis
+src/telegram.js   Telegram Bot API client (native fetch, rate-limit aware)
+src/state.js      Alert dedup state (persisted to data/state.json)
+src/env.js        .env loader
 ```
 
-## Ortam Degiskenleri (Opsiyonel)
+## Analysis Pipeline
 
-```
-UPTIME_KUMA_TOKEN         - JWT token (node scripts/get-jwt-token.js ile alinir)
-                            Yoksa: public HTTP API (fallback, sadece public monitorler)
-TIMEZONE                  - Zaman dilimi (default: UTC)
-ALERT_REPEAT_HOURS        - DOWN monitor icin tekrar alert araligi, saat (default: 4)
-TELEGRAM_CRITICAL_CHAT_ID - CRITICAL severity icin alternatif kanal
-TELEGRAM_WARNING_CHAT_ID  - WARNING severity icin alternatif kanal
-CODEX_BIN                 - Codex CLI binary yolu (default: codex)
-```
+1. `src/uptime.js` — fetch monitor data (Socket.IO if `UPTIME_KUMA_TOKEN` set, else public HTTP)
+2. `src/analyzer.js` — run `codex exec --json --sandbox read-only --output-schema config/analysis-schema.json`
+3. Parse JSONL event stream → extract `severity`, `healthScore`, `telegramMessage`, `criticalIssues`, `warnings`, `actions`, `detailedReport`
+4. `src/telegram.js` — route to channel by severity, split if >4000 chars, retry on 429/5xx
+5. `src/state.js` — persist monitor state, suppress repeat alerts within `ALERT_REPEAT_HOURS`
 
-## Analiz Mimarisi
+## Severity Rules
 
-`src/analyzer.js` Anthropic API KULLANMAZ.
-`codex exec --ephemeral --sandbox read-only --output-schema` ile calisiyor.
-Codex CLI kendi API key'ini kullanir (~/.codex/config.toml'daki model).
+- `CRITICAL` — any monitor DOWN, or 3+ simultaneously flapping
+- `WARNING`  — any flapping, ping >1000ms, 24h uptime <99%, 30d uptime <99.9%
+- `OK`       — all UP, stable trend, normal ping
+- When uncertain, choose the higher severity.
 
-`codex exec` prompt'u, `config/analysis-schema.json` schema'sına uygun JSON dondurur.
-Bu JSON'daki `telegramMessage` alani dogrudan Telegram'a gonderilir.
+## Environment Variables
 
-## Calistirma
+Required: `UPTIME_KUMA_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+
+Optional:
+- `UPTIME_KUMA_TOKEN` — JWT for full monitor access (all monitors, not just public)
+- `TIMEZONE` — default UTC
+- `ALERT_REPEAT_HOURS` — repeat alert interval in hours, default 4
+- `TELEGRAM_CRITICAL_CHAT_ID` / `TELEGRAM_WARNING_CHAT_ID` — severity escalation channels
+- `CODEX_BIN` — path to codex binary, default `codex`
+
+## Run Commands
 
 ```bash
-node src/index.js           # tek seferlik manuel calistirma
-node src/index.js --dry     # Telegram gondermeden test
-node src/index.js --debug   # Detayli log
-
-scripts/setup-systemd.sh    # Ubuntu/Linux systemd timer ile saatlik calistirma
-scripts/setup-launchd.sh    # macOS launchd ile saatlik calistirma
-scripts/setup-cron.sh       # Linux/macOS cron ile saatlik calistirma
+node src/index.js              # production run
+node src/index.js --dry        # skip Telegram send
+node src/index.js --debug      # verbose output
+node src/index.js --dry --debug
 ```
 
-## Codex CLI ile Kullanim
+## Skills
 
-```bash
-# Non-interactive analiz calistir
-codex exec --json --sandbox read-only --ephemeral \
-  "Uptime Kuma monitor durumunu analiz et ve Telegram bildirimi gonder"
-
-# Mevcut kodu incele ve iyilestir
-codex "src/analyzer.js dosyasindaki analiz promptunu daha iyi SRE pratikleri icin optimize et"
-
-# Yeni skill ekle
-codex "$skill-installer install the uptime-monitor skill"
-```
-
-## Mimari Notlar
-
-- JWT token (UPTIME_KUMA_TOKEN) varsa Socket.IO API kullanilir (tam erisim)
-- Token yoksa public HTTP status page API'ye fallback yapilir (sadece public monitorler)
-- Aksiyon almak (monitor durdurma/baslatma) ileriki surum icin planlanmis
-- `codex exec` ile non-interactive modda da calistirilebilir
+Use `.agents/skills/` for task-specific context:
+- `uptime-monitor`       — querying Uptime Kuma API
+- `resilience-analysis`  — SRE analysis rules and patterns
+- `telegram-dispatch`    — Telegram formatting and escalation

@@ -3,3 +3,4 @@ node_modules/
 *.log
 data/state.json
 .claude/
+/tmp/codex-analysis-*.json
