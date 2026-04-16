@@ -5,10 +5,22 @@ on:
     branches: [main, develop]
     types: [opened, synchronize, reopened]
 
+permissions: {}
+
+concurrency:
+  group: codex-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   review:
     name: Codex Review
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Make OPENAI_API_KEY available in step `if:` conditions via env context.
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
     permissions:
       contents: read
       pull-requests: write
@@ -35,6 +47,7 @@ jobs:
           done
 
       - name: Codex Review
+        if: env.OPENAI_API_KEY != ''
         uses: openai/codex-action@v1
         with:
           prompt: |
@@ -50,5 +63,9 @@ jobs:
           sandbox: "read-only"
           model: "gpt-5.4"
           effort: "high"
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: API key not configured
+        if: env.OPENAI_API_KEY == ''
+        run: |
+          echo "::warning::OPENAI_API_KEY secret is not set — Codex review skipped."
+          echo "Configure it at: Settings → Secrets and variables → Actions → New repository secret"
