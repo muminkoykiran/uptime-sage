@@ -130,4 +130,4 @@ node src/index.js --debug
 - ESM (import/export) kullanilir, `require()` kullanilmaz
 - Node.js v20.11+ gereklidir (`import.meta.dirname` zorunluluğu)
 - Native `fetch` kullanilir, harici HTTP kutuphanesi eklenmez
-- Yeni ozellikler `.codex/skills/` altina skill dosyasi ile dokumante edilir
+- Yeni ozellikler `.agents/skills/<name>/SKILL.md` altina skill dosyasi ile dokumante edilir

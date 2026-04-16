@@ -4,11 +4,9 @@ on:
   push:
     branches: [main]
 
-# Needs write access to create tags and releases.
 permissions:
   contents: write
 
-# Never cancel a release in progress — let it finish.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -32,13 +30,10 @@ jobs:
       - name: Check if tag already exists
         id: tag
         run: |
-          git fetch --tags --quiet
           if git rev-parse "v${{ steps.version.outputs.value }}" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Tag v${{ steps.version.outputs.value }} already exists — skipping release."
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "Tag v${{ steps.version.outputs.value }} not found — will create release."
           fi
 
       - name: Create GitHub Release
