@@ -12,7 +12,7 @@ Monitor verilerini uzman SRE ekibi gibi analiz etmek icin kural seti ve ornekler
 | Durum | Severity |
 |-------|----------|
 | Herhangi bir servis DOWN | CRITICAL |
-| 3+ monitor esz azamanlı flapping | CRITICAL |
+| 3+ monitor eş zamanlı flapping | CRITICAL |
 | Herhangi bir monitor flapping | WARNING |
 | Ping > 1000ms (kalici) | WARNING |
 | 24s uptime < %99 | WARNING |
