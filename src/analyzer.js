@@ -74,7 +74,7 @@ export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UT
         '--output-last-message', outFile,
         prompt,
       ],
-      { cwd: ROOT, timeout: 120_000, maxBuffer: 8 * 1024 * 1024, killSignal: 'SIGKILL' }
+      { cwd: ROOT, timeout: 120_000, maxBuffer: 8 * 1024 * 1024, killSignal: 'SIGKILL', input: '' }
     ));
   } catch (err) {
     const detail = [
