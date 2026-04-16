@@ -3,14 +3,37 @@
  * Anthropic API gerektirmez — codex exec (OpenAI) kullanir
  */
 
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import { join } from 'path';
 import { readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
-const execFileAsync = promisify(execFile);
+// execFileAsync with stdio: ['ignore', 'pipe', 'pipe'] so Codex never sees an open stdin.
+// The built-in execFile/execFileAsync input option is unreliable on Node 22 — it does not
+// close stdin before the child process starts reading, causing Codex to hang indefinitely.
+function spawnAsync(bin, args, { cwd, timeout = 120_000, maxBuffer = 8 * 1024 * 1024, killSignal = 'SIGKILL' } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    const timer = setTimeout(() => child.kill(killSignal), timeout);
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      if (signal) {
+        const err = new Error(`Process killed by signal ${signal}`);
+        err.signal = signal;
+        err.stderr = stderr;
+        reject(err);
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+    child.on('error', err => { clearTimeout(timer); reject(err); });
+  });
+}
 
 const ROOT = join(import.meta.dirname, '..');
 const SCHEMA_PATH = join(ROOT, 'config', 'analysis-schema.json');
@@ -62,7 +85,7 @@ export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UT
 
   let stdout, stderr;
   try {
-    ({ stdout, stderr } = await execFileAsync(
+    ({ stdout, stderr } = await spawnAsync(
       codexBin,
       [
         'exec',
@@ -74,7 +97,7 @@ export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UT
         '--output-last-message', outFile,
         prompt,
       ],
-      { cwd: ROOT, timeout: 120_000, maxBuffer: 8 * 1024 * 1024, killSignal: 'SIGKILL', input: '' }
+      { cwd: ROOT, timeout: 120_000, maxBuffer: 8 * 1024 * 1024, killSignal: 'SIGKILL' }
     ));
   } catch (err) {
     const detail = [
