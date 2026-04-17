@@ -1,0 +1,10 @@
+{
+  "_note": "Copy to monitor-ssh-map.private.json and fill in real values. That file is gitignored.",
+  "monitors": {
+    "1":  { "note": "Example HTTP service on master",   "host": "203.0.113.10", "user": "ubuntu", "type": "http",    "service": "8080" },
+    "2":  { "note": "Example Docker service on master", "host": "203.0.113.10", "user": "ubuntu", "type": "docker",  "service": "myapp" },
+    "3":  { "note": "Example systemd service",          "host": "203.0.113.10", "user": "ubuntu", "type": "systemd", "service": "myapp.service" },
+    "4":  { "note": "External site — skip",             "skip": true,           "_reason": "no SSH access" },
+    "5":  { "note": "Server ping only",                 "host": "203.0.113.20", "user": "ubuntu" }
+  }
+}
