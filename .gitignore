@@ -1,7 +1,7 @@
 .env
 node_modules/
 *.log
-data/state.json
+data/
 .claude/
 /tmp/codex-analysis-*.json
 config/*.private.md
