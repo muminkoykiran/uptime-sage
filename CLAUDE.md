@@ -17,18 +17,22 @@ There are no automated tests. Validation is done via `--dry --debug`.
 Single-pass pipeline that runs to completion and exits:
 
 ```
-src/uptime.js → src/analyzer.js → src/telegram.js
+src/uptime.js → src/ssh-diagnostics.js → src/analyzer.js → src/telegram.js
 ```
 
-1. **`src/uptime.js`** — fetches monitor data. If `UPTIME_KUMA_TOKEN` is set, uses Socket.IO (`connectSocketIO` + `fetchAllMonitors`). Otherwise falls back to public HTTP (`fetchStatusPageList` → `fetchPublicStatus` → `parsePublicMonitors`). Always returns the same shape via `aggregateStats`.
+1. **`src/uptime.js`** — fetches monitor data. If `UPTIME_KUMA_TOKEN` is set, uses Socket.IO (`connectSocketIO` + `fetchAllMonitors`). Otherwise falls back to public HTTP (`fetchStatusPageList` → `fetchPublicStatus` → `parsePublicMonitors`). Always returns the same shape via `aggregateStats`. Monitor objects include a `tags: [{name, value}]` array (Socket.IO mode only; public HTTP has no tags).
 
-2. **`src/analyzer.js`** — shells out to `codex exec --json --sandbox read-only --output-schema config/analysis-schema.json --output-last-message <tmpfile>` via a custom `spawnAsync` helper that uses `stdio: ['ignore', 'pipe', 'pipe']`. **Do not replace this with `execFile`/`execFileAsync`** — Node 22's `input` option does not reliably close the child's stdin pipe, causing Codex to block waiting for EOF indefinitely. With stdin ignored, Codex detects EOF immediately and proceeds. Parses response in three tiers: temp file first, then JSONL event stream (`turn.completed` / `item.completed`), then raw stdout scan. Falls back to `buildFallbackAnalysis()` if Codex is unavailable.
+2. **`src/ssh-diagnostics.js`** — runs only when `needsAlert: true` and `SSH_DIAGNOSTICS_ENABLED=true`. Reads `ssh-host/user/port/type/service` tags from DOWN monitors, groups by host (one SSH connection per unique host), runs commands in parallel across hosts. Command whitelist is in `config/ssh-diagnostics.json`. Output is secret-scrubbed before reaching Codex. Returns `DiagnosticResult[]`.
 
-3. **`src/telegram.js`** — sends via Bot API. Routes to `TELEGRAM_CRITICAL_CHAT_ID` / `TELEGRAM_WARNING_CHAT_ID` by severity, falls back to `TELEGRAM_CHAT_ID`. Splits messages >4000 chars, retries on 429/5xx.
+3. **`src/analyzer.js`** — shells out to `codex exec` via `spawnAsync` from `src/util.js`. Accepts optional `diagnostics` param and injects a `─── SSH DIAGNOSTICS ───` section into the Codex prompt. **Do not replace `spawnAsync` with `execFile`/`execFileAsync`** — Node 22's `input` option does not reliably close stdin, causing Codex to hang indefinitely.
 
-4. **`src/state.js`** — reads/writes `data/state.json` (gitignored). Tracks last alert time per monitor to suppress repeat alerts within `ALERT_REPEAT_HOURS` (default 4).
+4. **`src/telegram.js`** — sends via Bot API. Routes to `TELEGRAM_CRITICAL_CHAT_ID` / `TELEGRAM_WARNING_CHAT_ID` by severity, falls back to `TELEGRAM_CHAT_ID`. Splits messages >4000 chars, retries on 429/5xx.
 
-5. **`src/index.js`** — orchestrates the above. All operational logs go through the `log()` helper here (adds `[HH:MM:SS]` prefix). Exit codes: `0` = OK/WARNING, `1` = error, `2` = CRITICAL.
+5. **`src/state.js`** — reads/writes `data/state.json` (gitignored). Tracks last alert time per monitor to suppress repeat alerts within `ALERT_REPEAT_HOURS` (default 4).
+
+6. **`src/util.js`** — shared `spawnAsync` helper. Import from here in all modules.
+
+7. **`src/index.js`** — orchestrates the above. All operational logs go through the `log()` helper here (adds `[HH:MM:SS]` prefix). Exit codes: `0` = OK/WARNING, `1` = error, `2` = CRITICAL.
 
 ## Code Rules
 
@@ -36,6 +40,7 @@ src/uptime.js → src/analyzer.js → src/telegram.js
 - Node.js v20.11+ required (`import.meta.dirname` used throughout).
 - Native `fetch` only — never add axios or node-fetch.
 - All env vars loaded through `src/env.js` (`loadEnv()` + `requireEnv()`).
+- Shared utilities (e.g. `spawnAsync`) live in `src/util.js` — never duplicate them.
 - New features need a skill file at `.agents/skills/<name>/SKILL.md`.
 
 ## Git Flow

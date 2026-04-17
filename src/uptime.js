@@ -194,6 +194,7 @@ export function parseSocketMonitors(monitorList, heartbeatList) {
       type: monitor.type,
       url: monitor.url || null,
       group: monitor.tags?.map(t => (typeof t === 'string' ? t : t.name)).filter(Boolean).join(', ') || '',
+      tags: Array.isArray(monitor.tags) ? monitor.tags.filter(t => t && typeof t === 'object') : [],
       active: monitor.active,
       status: latest?.status ?? -1,
       statusText: statusLabel(latest?.status),

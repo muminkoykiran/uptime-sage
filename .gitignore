@@ -4,3 +4,5 @@ node_modules/
 data/state.json
 .claude/
 /tmp/codex-analysis-*.json
+config/*.private.md
+config/servers.private.md

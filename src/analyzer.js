@@ -3,37 +3,11 @@
  * Anthropic API gerektirmez — codex exec (OpenAI) kullanir
  */
 
-import { spawn } from 'child_process';
 import { join } from 'path';
 import { readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-
-// execFileAsync with stdio: ['ignore', 'pipe', 'pipe'] so Codex never sees an open stdin.
-// The built-in execFile/execFileAsync input option is unreliable on Node 22 — it does not
-// close stdin before the child process starts reading, causing Codex to hang indefinitely.
-function spawnAsync(bin, args, { cwd, timeout = 120_000, maxBuffer = 8 * 1024 * 1024, killSignal = 'SIGKILL' } = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', d => { stdout += d; });
-    child.stderr.on('data', d => { stderr += d; });
-    const timer = setTimeout(() => child.kill(killSignal), timeout);
-    child.on('close', (code, signal) => {
-      clearTimeout(timer);
-      if (signal) {
-        const err = new Error(`Process killed by signal ${signal}`);
-        err.signal = signal;
-        err.stderr = stderr;
-        reject(err);
-      } else {
-        resolve({ stdout, stderr });
-      }
-    });
-    child.on('error', err => { clearTimeout(timer); reject(err); });
-  });
-}
+import { spawnAsync } from './util.js';
 
 const ROOT = join(import.meta.dirname, '..');
 const SCHEMA_PATH = join(ROOT, 'config', 'analysis-schema.json');
@@ -76,12 +50,31 @@ function parseJsonlOutput(stdout) {
   return null;
 }
 
-export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UTC') {
+const _isDebug = process.argv.includes('--debug');
+const _tz = () => process.env.TIMEZONE || 'UTC';
+const _now = () => new Date().toLocaleTimeString('tr-TR', { timeZone: _tz() });
+
+export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UTC', diagnostics = []) {
   const codexBin = process.env.CODEX_BIN || 'codex';
-  const prompt = buildPrompt(monitors, stats, timestamp, timezone);
+  const prompt = buildPrompt(monitors, stats, timestamp, timezone, diagnostics);
 
   // Gecici output dosyasi — --output-last-message ile temiz JSON cikti
   const outFile = join(tmpdir(), `codex-analysis-${randomUUID()}.json`);
+
+  // Progress ticker — her 30s'de bir satir (Codex uzun surer, geri yazmasin)
+  const spawnMs = Date.now();
+  const progressTimer = setInterval(() => {
+    const s = Math.round((Date.now() - spawnMs) / 1000);
+    console.log(`[${_now()}] Codex CLI çalışıyor... (${s}s)`);
+  }, 30_000);
+  const clearProgress = () => clearInterval(progressTimer);
+
+  // Debug modunda Codex stderr'ini canli yaz (başlangıç hataları burada çıkar)
+  const onStderr = _isDebug ? (chunk) => {
+    for (const line of chunk.split('\n')) {
+      if (line.trim()) process.stdout.write(`\r[CODEX] ${line.trim()}\n`);
+    }
+  } : undefined;
 
   let stdout, stderr;
   try {
@@ -97,9 +90,11 @@ export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UT
         '--output-last-message', outFile,
         prompt,
       ],
-      { cwd: ROOT, timeout: 120_000, maxBuffer: 8 * 1024 * 1024, killSignal: 'SIGKILL' }
+      { cwd: ROOT, timeout: 180_000, killSignal: 'SIGKILL', onStderr }
     ));
+    clearProgress();
   } catch (err) {
+    clearProgress();
     const detail = [
       err.stderr?.slice(0, 500) || err.message,
       err.code ? `code=${err.code}` : '',
@@ -107,6 +102,7 @@ export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UT
     ].filter(Boolean).join(' | ');
 
     console.error(`codex exec hatasi: ${detail}`);
+    if (_isDebug && stdout) console.error(`[DEBUG] codex stdout (son 500 karakter):\n${stdout.slice(-500)}`);
     cleanupTmpFile(outFile);
     return buildFallbackAnalysis(stats);
   }
@@ -222,7 +218,30 @@ function detectFlapping(recentStatuses) {
   return transitions > 4;
 }
 
-function buildPrompt(monitors, stats, timestamp, timezone) {
+function buildDiagnosticsSection(diagnostics) {
+  if (!diagnostics || diagnostics.length === 0) return '';
+  const lines = ['', '─── SSH DIAGNOSTICS ───'];
+  for (const d of diagnostics) {
+    const monitorNames = d.monitors?.join(', ') || d.monitorName || '?';
+    if (d.status === 'error') {
+      lines.push(`Host: ${d.host} (${monitorNames})`);
+      lines.push(`  SSH_ERROR: ${d.reason}`);
+    } else {
+      lines.push(`Host: ${d.host} (${monitorNames})`);
+      for (const cmd of (d.commands || [])) {
+        lines.push(`  [${cmd.type}] ${cmd.label}`);
+        // Her satiri 2 boslukla girintile, boş satırlari atla
+        for (const line of cmd.output.split('\n')) {
+          if (line.trim()) lines.push(`    ${line}`);
+        }
+      }
+    }
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
+function buildPrompt(monitors, stats, timestamp, timezone, diagnostics = []) {
   const problematic = [];
   const healthyNames = [];
 
@@ -264,7 +283,7 @@ ${downLine}${slowLine}
 Not: recentTrend sol=eski sağ=yeni, [!]=flapping.
 
 Sağlıklı (${healthyNames.length}): ${healthyNames.join(', ') || 'YOK'}
-
+${buildDiagnosticsSection(diagnostics)}
 ─── SEVERİTY KURALLARI ───
 CRITICAL → herhangi DOWN | 3+ monitor eş zamanlı flapping
 WARNING  → herhangi flapping | ping kalıcı >1000ms | 24s uptime <%99 | 30g uptime <%99.9

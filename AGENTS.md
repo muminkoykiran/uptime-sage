@@ -15,21 +15,24 @@ You are an expert SRE agent for a Uptime Kuma monitoring system. Your job is to 
 ## Source Layout
 
 ```
-src/index.js      Orchestration entry point — run this to start the agent
-src/uptime.js     Uptime Kuma client (Socket.IO+JWT primary, HTTP fallback)
-src/analyzer.js   Codex exec engine — produces structured JSON analysis
-src/telegram.js   Telegram Bot API client (native fetch, rate-limit aware)
-src/state.js      Alert dedup state (persisted to data/state.json)
-src/env.js        .env loader
+src/index.js          Orchestration entry point — run this to start the agent
+src/uptime.js         Uptime Kuma client (Socket.IO+JWT primary, HTTP fallback)
+src/ssh-diagnostics.js  SSH diagnostic runner for DOWN/PENDING monitors
+src/analyzer.js       Codex exec engine — produces structured JSON analysis
+src/telegram.js       Telegram Bot API client (native fetch, rate-limit aware)
+src/state.js          Alert dedup state (persisted to data/state.json)
+src/env.js            .env loader
+src/util.js           Shared utilities (spawnAsync)
 ```
 
 ## Analysis Pipeline
 
-1. `src/uptime.js` — fetch monitor data (Socket.IO if `UPTIME_KUMA_TOKEN` set, else public HTTP)
-2. `src/analyzer.js` — run `codex exec --json --sandbox read-only --output-schema config/analysis-schema.json`
-3. Parse JSONL event stream → extract `severity`, `healthScore`, `telegramMessage`, `criticalIssues`, `warnings`, `actions`, `detailedReport`
-4. `src/telegram.js` — route to channel by severity, split if >4000 chars, retry on 429/5xx
+1. `src/uptime.js` — fetch monitor data (Socket.IO+JWT if `UPTIME_KUMA_TOKEN` set, else public HTTP)
+2. `src/ssh-diagnostics.js` — SSH into DOWN/PENDING monitors when `SSH_DIAGNOSTICS_ENABLED=true`; reads `ssh-host/user/port/type/service` tags from affected monitors; commands whitelisted in `config/ssh-diagnostics.json`
+3. `src/analyzer.js` — Codex CLI analysis; receives optional `diagnostics` array; injects SSH results into the Codex prompt under a `─── SSH DIAGNOSTICS ───` section
+4. `src/telegram.js` — send notification; route to channel by severity, split if >4000 chars, retry on 429/5xx
 5. `src/state.js` — persist monitor state, suppress repeat alerts within `ALERT_REPEAT_HOURS`
+6. `src/util.js` — shared `spawnAsync` helper; import from here in all modules
 
 ## Severity Rules
 
@@ -48,6 +51,9 @@ Optional:
 - `ALERT_REPEAT_HOURS` — repeat alert interval in hours, default 4
 - `TELEGRAM_CRITICAL_CHAT_ID` / `TELEGRAM_WARNING_CHAT_ID` — severity escalation channels
 - `CODEX_BIN` — path to codex binary, default `codex`
+- `SSH_DIAGNOSTICS_ENABLED` — set to `true` to enable SSH diagnostics
+- `SSH_USER` — default SSH username (overridden by monitor `ssh-user` tag)
+- `SSH_KEY_PATH` — path to SSH private key (default: `~/.ssh/id_rsa`)
 
 ## Run Commands
 
@@ -64,3 +70,4 @@ Use `.agents/skills/` for task-specific context:
 - `uptime-monitor`       — querying Uptime Kuma API
 - `resilience-analysis`  — SRE analysis rules and patterns
 - `telegram-dispatch`    — Telegram formatting and escalation
+- `ssh-diagnostics`      — SSH into DOWN/PENDING monitors, run safe read-only diagnostic commands, inject results into Codex prompt

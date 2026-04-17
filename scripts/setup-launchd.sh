@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================
-# macOS LaunchAgent kurulum scripti
-# Her saat basinda uptime-resilience-agent'i calistirir
-# Kullanim: bash scripts/setup-launchd.sh
+# macOS LaunchAgent setup script
+# Runs uptime-resilience-agent at the top of every hour
+# Usage: bash scripts/setup-launchd.sh
 # ============================================================
 
 set -euo pipefail
