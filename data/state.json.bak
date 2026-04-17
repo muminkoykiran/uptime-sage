@@ -1,0 +1,56 @@
+{
+  "15": {
+    "id": 15,
+    "name": "Master Tomato Tricker",
+    "status": 0,
+    "firstDownAt": "2026-04-16T20:38:55.786Z",
+    "lastAlertAt": "2026-04-16T20:38:55.786Z",
+    "alertCount": 1,
+    "lastSeenAt": "2026-04-16T20:50:03.769Z"
+  },
+  "18": {
+    "id": 18,
+    "name": "FinancialGPT.service",
+    "status": 0,
+    "firstDownAt": "2026-04-16T20:38:55.786Z",
+    "lastAlertAt": "2026-04-16T20:38:55.786Z",
+    "alertCount": 1,
+    "lastSeenAt": "2026-04-16T20:50:03.769Z"
+  },
+  "19": {
+    "id": 19,
+    "name": "Jetson Nano",
+    "status": 2,
+    "firstDownAt": "2026-04-16T20:38:55.786Z",
+    "lastAlertAt": "2026-04-16T20:38:55.786Z",
+    "alertCount": 1,
+    "lastSeenAt": "2026-04-16T20:50:03.769Z"
+  },
+  "21": {
+    "id": 21,
+    "name": "Homebridge",
+    "status": 0,
+    "firstDownAt": "2026-04-16T20:38:55.786Z",
+    "lastAlertAt": "2026-04-16T20:38:55.786Z",
+    "alertCount": 1,
+    "lastSeenAt": "2026-04-16T20:50:03.769Z"
+  },
+  "23": {
+    "id": 23,
+    "name": "Local Anthropic API",
+    "status": 0,
+    "firstDownAt": "2026-04-16T20:38:55.786Z",
+    "lastAlertAt": "2026-04-16T20:38:55.786Z",
+    "alertCount": 1,
+    "lastSeenAt": "2026-04-16T20:50:03.769Z"
+  },
+  "26": {
+    "id": 26,
+    "name": "CandyTrader.service (master)",
+    "status": 0,
+    "firstDownAt": "2026-04-16T20:38:55.786Z",
+    "lastAlertAt": "2026-04-16T20:38:55.786Z",
+    "alertCount": 1,
+    "lastSeenAt": "2026-04-16T20:50:03.769Z"
+  }
+}
