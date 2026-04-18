@@ -1,41 +1,46 @@
 #!/usr/bin/env bash
 # ============================================================
-# macOS LaunchAgent setup script
-# Runs uptime-resilience-agent at the top of every hour
-# Usage: bash scripts/setup-launchd.sh
+# macOS LaunchDaemon setup script
+# System-level kurulum — login gerektirmez, boot'ta baslar.
+# Kullanim: sudo bash scripts/setup-launchd.sh
 # ============================================================
 
 set -euo pipefail
 
-AGENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PLIST_NAME="com.uptime.resilience.agent"
-PLIST_PATH="$HOME/Library/LaunchAgents/${PLIST_NAME}.plist"
-NODE_PATH="$(command -v node || echo '/usr/local/bin/node')"
-NODE_BIN_DIR="$(dirname "$NODE_PATH")"
-LOG_DIR="$HOME/Library/Logs/uptime-resilience-agent"
-
-echo "Proje dizini: $AGENT_DIR"
-echo "Node.js: $NODE_PATH"
-echo ""
-
-# .env dosyasi kontrolu
-if [ ! -f "$AGENT_DIR/.env" ]; then
-  echo "HATA: $AGENT_DIR/.env dosyasi bulunamadi!"
-  echo "Lutfen: cp $AGENT_DIR/.env.example $AGENT_DIR/.env"
-  echo "Lutfen .env dosyasini kontrol edin: TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID zorunludur."
+if [ "$(id -u)" -ne 0 ]; then
+  echo "HATA: Bu script sudo ile calistirilmalidir."
+  echo "  sudo bash scripts/setup-launchd.sh"
   exit 1
 fi
 
-# node_modules kontrolu
-if [ ! -d "$AGENT_DIR/node_modules" ]; then
-  echo "Bagimlilıklar yukleniyor..."
-  cd "$AGENT_DIR" && npm install
+AGENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PLIST_NAME="com.uptime.resilience.agent"
+PLIST_PATH="/Library/LaunchDaemons/${PLIST_NAME}.plist"
+NODE_PATH="$(command -v node || echo '/usr/local/bin/node')"
+NODE_BIN_DIR="$(dirname "$NODE_PATH")"
+# Servisi proje dosyalarinin sahibi olan kullanici olarak calistir
+SERVICE_USER="$(stat -f '%Su' "$AGENT_DIR")"
+LOG_DIR="/var/log/uptime-resilience-agent"
+
+echo "Proje dizini: $AGENT_DIR"
+echo "Node.js:      $NODE_PATH"
+echo "Servis kullanicisi: $SERVICE_USER"
+echo ""
+
+if [ ! -f "$AGENT_DIR/.env" ]; then
+  echo "HATA: $AGENT_DIR/.env dosyasi bulunamadi!"
+  echo "  cp $AGENT_DIR/.env.example $AGENT_DIR/.env"
+  exit 1
 fi
 
-# Log dizini olustur
-mkdir -p "$LOG_DIR"
+if [ ! -d "$AGENT_DIR/node_modules" ]; then
+  echo "Bagimliliklar yukleniyor..."
+  su - "$SERVICE_USER" -c "cd '$AGENT_DIR' && npm install"
+fi
 
-# LaunchAgent plist olustur
+mkdir -p "$LOG_DIR"
+chown "$SERVICE_USER" "$LOG_DIR"
+
 cat > "$PLIST_PATH" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -44,6 +49,9 @@ cat > "$PLIST_PATH" <<EOF
 <dict>
   <key>Label</key>
   <string>${PLIST_NAME}</string>
+
+  <key>UserName</key>
+  <string>${SERVICE_USER}</string>
 
   <key>ProgramArguments</key>
   <array>
@@ -81,30 +89,30 @@ cat > "$PLIST_PATH" <<EOF
 </plist>
 EOF
 
-echo "LaunchAgent olusturuldu: $PLIST_PATH"
+chown root:wheel "$PLIST_PATH"
+chmod 644 "$PLIST_PATH"
 
-# Mevcut servis varsa bootout et
-if launchctl print "gui/$(id -u)/$PLIST_NAME" 2>/dev/null; then
-  echo "Mevcut servis kaldiriliyor..."
-  launchctl bootout "gui/$(id -u)" "$PLIST_PATH" 2>/dev/null || true
+# Mevcut daemon varsa kaldır
+if launchctl print "system/$PLIST_NAME" 2>/dev/null; then
+  echo "Mevcut daemon kaldiriliyor..."
+  launchctl bootout system "$PLIST_PATH" 2>/dev/null || true
 fi
 
-# Servisi yukle ve baslat
-launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
-echo "LaunchAgent yuklendi!"
+launchctl bootstrap system "$PLIST_PATH"
+echo "LaunchDaemon yuklendi!"
 
 echo ""
 echo "=== KURULUM TAMAMLANDI ==="
 echo ""
-echo "Her saat basinda (XX:00) otomatik calisacak."
+echo "Her saat basinda (XX:00) otomatik calisacak. Login gerektirmez."
 echo ""
 echo "Kullanim komutlari:"
-echo "  Durum kontrol:   launchctl print gui/$(id -u)/$PLIST_NAME"
-echo "  Simdi calistir:  launchctl kickstart gui/$(id -u)/$PLIST_NAME"
-echo "  Durdur:          launchctl kill SIGTERM gui/$(id -u)/$PLIST_NAME"
-echo "  Kaldır:          launchctl bootout gui/$(id -u) $PLIST_PATH && rm $PLIST_PATH"
-echo "  Loglar:          tail -f $LOG_DIR/stdout.log"
-echo "  Hata logları:    tail -f $LOG_DIR/stderr.log"
+echo "  Durum:          sudo launchctl print system/$PLIST_NAME"
+echo "  Simdi calistir: sudo launchctl kickstart system/$PLIST_NAME"
+echo "  Durdur:         sudo launchctl kill SIGTERM system/$PLIST_NAME"
+echo "  Kaldir:         sudo launchctl bootout system $PLIST_PATH && sudo rm $PLIST_PATH"
+echo "  Loglar:         tail -f $LOG_DIR/stdout.log"
+echo "  Hata loglari:   tail -f $LOG_DIR/stderr.log"
 echo ""
 echo "Hemen test etmek icin:"
-echo "  node $AGENT_DIR/src/index.js --dry"
+echo "  sudo -u ${SERVICE_USER} node ${AGENT_DIR}/src/index.js --dry"
