@@ -1,40 +1,46 @@
 #!/usr/bin/env bash
 # ============================================================
 # systemd timer setup script (Ubuntu / Debian / Linux)
-# Runs uptime-resilience-agent at the top of every hour
-# Usage: bash scripts/setup-systemd.sh
+# System-level kurulum — login gerektirmez, boot'ta baslar.
+# Kullanim: sudo bash scripts/setup-systemd.sh
 # ============================================================
 
 set -euo pipefail
 
-AGENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NODE_PATH="$(command -v node || echo '/usr/bin/node')"
-SERVICE_DIR="$HOME/.config/systemd/user"
-SERVICE_NAME="uptime-resilience-agent"
-LOG_DIR="$HOME/.local/log/uptime-resilience-agent"
-
-echo "Proje dizini: $AGENT_DIR"
-echo "Node.js:      $NODE_PATH"
-echo "Servis:       $SERVICE_DIR/$SERVICE_NAME"
-echo ""
-
-# .env dosyasi kontrolu
-if [ ! -f "$AGENT_DIR/.env" ]; then
-  echo "HATA: $AGENT_DIR/.env dosyasi bulunamadi!"
-  echo "Lutfen: cp $AGENT_DIR/.env.example $AGENT_DIR/.env"
+if [ "$(id -u)" -ne 0 ]; then
+  echo "HATA: Bu script sudo ile calistirilmalidir."
+  echo "  sudo bash scripts/setup-systemd.sh"
   exit 1
 fi
 
-# node_modules kontrolu
-if [ ! -d "$AGENT_DIR/node_modules" ]; then
-  echo "Bagimliliklar yukleniyor..."
-  cd "$AGENT_DIR" && npm install
+AGENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NODE_PATH="$(command -v node || echo '/usr/bin/node')"
+# Servisi proje dosyalarinin sahibi olan kullanici olarak calistir
+SERVICE_USER="$(stat -c '%U' "$AGENT_DIR")"
+SERVICE_DIR="/etc/systemd/system"
+SERVICE_NAME="uptime-resilience-agent"
+LOG_DIR="/var/log/${SERVICE_NAME}"
+
+echo "Proje dizini: $AGENT_DIR"
+echo "Node.js:      $NODE_PATH"
+echo "Servis kullanicisi: $SERVICE_USER"
+echo "Servis:       $SERVICE_DIR/$SERVICE_NAME"
+echo ""
+
+if [ ! -f "$AGENT_DIR/.env" ]; then
+  echo "HATA: $AGENT_DIR/.env dosyasi bulunamadi!"
+  echo "  cp $AGENT_DIR/.env.example $AGENT_DIR/.env"
+  exit 1
 fi
 
-# Dizinleri olustur
-mkdir -p "$SERVICE_DIR" "$LOG_DIR"
+if [ ! -d "$AGENT_DIR/node_modules" ]; then
+  echo "Bagimliliklar yukleniyor..."
+  su - "$SERVICE_USER" -c "cd '$AGENT_DIR' && npm install"
+fi
 
-# systemd .service unit
+mkdir -p "$LOG_DIR"
+chown "$SERVICE_USER" "$LOG_DIR"
+
 cat > "$SERVICE_DIR/${SERVICE_NAME}.service" <<EOF
 [Unit]
 Description=Uptime Resilience Agent
@@ -43,14 +49,17 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+User=${SERVICE_USER}
 WorkingDirectory=${AGENT_DIR}
 ExecStart=${NODE_PATH} ${AGENT_DIR}/src/index.js
 StandardOutput=append:${LOG_DIR}/stdout.log
 StandardError=append:${LOG_DIR}/stderr.log
 SuccessExitStatus=0 1 2 3
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
-# systemd .timer unit (her saat basinda)
 cat > "$SERVICE_DIR/${SERVICE_NAME}.timer" <<EOF
 [Unit]
 Description=Uptime Resilience Agent — saatlik zamanlama
@@ -63,23 +72,22 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-# systemd reload ve enable
-systemctl --user daemon-reload
-systemctl --user enable --now "${SERVICE_NAME}.timer"
+systemctl daemon-reload
+systemctl enable --now "${SERVICE_NAME}.timer"
 
 echo "systemd timer yuklendi ve baslatildi!"
 echo ""
 echo "=== KURULUM TAMAMLANDI ==="
 echo ""
-echo "Her saat basinda (XX:00) otomatik calisacak."
+echo "Her saat basinda (XX:00) otomatik calisacak. Login gerektirmez."
 echo ""
 echo "Kullanim komutlari:"
-echo "  Durum:          systemctl --user status ${SERVICE_NAME}.timer"
-echo "  Simdi calistir: systemctl --user start ${SERVICE_NAME}.service"
-echo "  Durdur:         systemctl --user stop ${SERVICE_NAME}.timer"
-echo "  Kaldir:         systemctl --user disable --now ${SERVICE_NAME}.timer && rm ${SERVICE_DIR}/${SERVICE_NAME}.{service,timer}"
+echo "  Durum:          systemctl status ${SERVICE_NAME}.timer"
+echo "  Simdi calistir: systemctl start ${SERVICE_NAME}.service"
+echo "  Durdur:         systemctl stop ${SERVICE_NAME}.timer"
+echo "  Kaldir:         systemctl disable --now ${SERVICE_NAME}.timer && rm ${SERVICE_DIR}/${SERVICE_NAME}.{service,timer}"
 echo "  Loglar:         tail -f ${LOG_DIR}/stdout.log"
 echo "  Hata loglari:   tail -f ${LOG_DIR}/stderr.log"
 echo ""
 echo "Hemen test etmek icin:"
-echo "  node ${AGENT_DIR}/src/index.js --dry"
+echo "  sudo -u ${SERVICE_USER} node ${AGENT_DIR}/src/index.js --dry"
