@@ -2,55 +2,55 @@
 
 ## Git Flow
 
-This project uses [Git Flow](https://nvie.com/posts/a-successful-git-branching-model/).
+Bu proje [Git Flow](https://nvie.com/posts/a-successful-git-branching-model/) kullanir.
 
-### Branch Structure
+### Branch Yapisi
 
-| Branch | Purpose |
-|--------|---------|
-| `main` | Production — release merges and hotfixes only |
-| `develop` | Integration — all features merge here |
-| `feature/*` | New feature development |
-| `release/*` | Release preparation (version bump, final fixes) |
-| `hotfix/*` | Critical bug fixes for production |
+| Branch | Amac |
+|--------|------|
+| `main` | Production — sadece release merge'leri ve hotfix'ler |
+| `develop` | Integration — tum feature'lar buraya merge edilir |
+| `feature/*` | Yeni ozellik gelistirme |
+| `release/*` | Surum hazirlik (version bump, son duzeltmeler) |
+| `hotfix/*` | Production'daki kritik bug fix'ler |
 
-### Developing a New Feature
+### Yeni Ozellik Gelistirme
 
 ```bash
-# 1. Create a feature branch from develop
+# 1. develop'tan feature branch ac
 git checkout develop
 git pull origin develop
-git checkout -b feature/feature-name
+git checkout -b feature/ozellik-adi
 
-# 2. Develop and commit
-git add <files>
-git commit -m "feat: feature description"
+# 2. Gelistir, commit'le
+git add <dosyalar>
+git commit -m "feat: ozellik aciklamasi"
 
-# 3. Merge into develop
+# 3. develop'a merge et
 git checkout develop
-git merge --no-ff feature/feature-name -m "merge: feature/feature-name into develop"
+git merge --no-ff feature/ozellik-adi -m "merge: feature/ozellik-adi into develop"
 git push origin develop
 
-# 4. Clean up the feature branch (optional)
-git branch -d feature/feature-name
+# 4. Feature branch'i temizle (opsiyonel)
+git branch -d feature/ozellik-adi
 ```
 
-### Cutting a New Release
+### Yeni Surum Cikartma
 
 ```bash
-# 1. Create a release branch from develop
+# 1. develop'tan release branch ac
 git checkout develop
 git checkout -b release/x.y.z
 
-# 2. Version bump and final fixes
-# Update version in package.json, add CHANGELOG entry if applicable
+# 2. Version bump ve son duzeltmeler
+# package.json versiyonunu guncelle, CHANGELOG varsa ekle
 
-# 3. Merge into main and tag
+# 3. main'e merge et ve tag'le
 git checkout main
 git merge --no-ff release/x.y.z -m "release: vx.y.z"
 git tag -a vx.y.z -m "Uptime Resilience Agent vx.y.z"
 
-# 4. Back-merge into develop
+# 4. develop'a geri merge et
 git checkout develop
 git merge --no-ff release/x.y.z -m "merge: release/x.y.z back into develop"
 
@@ -61,46 +61,46 @@ git push origin main develop --tags
 ### Production Hotfix
 
 ```bash
-# 1. Create a hotfix branch from main
+# 1. main'den hotfix branch ac
 git checkout main
-git checkout -b hotfix/bug-name
+git checkout -b hotfix/bug-adi
 
-# 2. Fix and commit
-git commit -m "fix: bug description"
+# 2. Fix et ve commit'le
+git commit -m "fix: bug aciklamasi"
 
-# 3. Merge into main and tag
+# 3. main'e merge et ve tag'le
 git checkout main
-git merge --no-ff hotfix/bug-name -m "hotfix: bug-name"
+git merge --no-ff hotfix/bug-adi -m "hotfix: bug-adi"
 git tag -a vx.y.z -m "Uptime Resilience Agent vx.y.z"
 
-# 4. Back-merge into develop
+# 4. develop'a da merge et
 git checkout develop
-git merge --no-ff hotfix/bug-name -m "merge: hotfix/bug-name into develop"
+git merge --no-ff hotfix/bug-adi -m "merge: hotfix/bug-adi into develop"
 
 # 5. Push
 git push origin main develop --tags
 ```
 
-## Commit Message Format
+## Commit Mesaji Formati
 
-[Conventional Commits](https://www.conventionalcommits.org/) are used:
+[Conventional Commits](https://www.conventionalcommits.org/) kullanilir:
 
 ```
-<type>: <short description>
+<tip>: <kisa aciklama>
 
-[optional body]
+[opsiyonel govde]
 ```
 
-| Type | Usage |
-|------|-------|
-| `feat` | New feature |
+| Tip | Kullanim |
+|-----|----------|
+| `feat` | Yeni ozellik |
 | `fix` | Bug fix |
-| `docs` | Documentation changes only |
-| `refactor` | Code restructuring without behaviour change |
-| `test` | Adding or updating tests |
-| `chore` | Build, dependencies, configuration |
+| `docs` | Sadece dokumantasyon degisikligi |
+| `refactor` | Davranis degismeden kod duzenleme |
+| `test` | Test ekleme veya duzenleme |
+| `chore` | Build, bagimlilik, yapilandirma |
 
-### Examples
+### Ornekler
 
 ```
 feat: add PagerDuty escalation support
@@ -110,24 +110,24 @@ refactor: extract message chunking to shared utility
 chore: update socket.io-client to 4.9.0
 ```
 
-## Development Environment
+## Gelistirme Ortami
 
 ```bash
-# Install dependencies
+# Bagimliliklari yukle
 npm install
 
-# Dry-run test (without sending Telegram messages)
+# Dry-run test (Telegram gondermeden)
 node src/index.js --dry --debug
 
-# Live test
+# Canli test
 node src/index.js --debug
 ```
 
-## Rules Summary
+## Kural Ozeti
 
-- Never push directly to `main` — always go through a PR or release merge
-- Never commit `.env`
-- Use ESM (`import`/`export`), never `require()`
-- Node.js v20.11+ required (`import.meta.dirname` dependency)
-- Use native `fetch` — do not add external HTTP libraries
-- New features must be documented with a skill file at `.agents/skills/<name>/SKILL.md`
+- `main` branch'ine direkt push yapilmaz — her zaman PR veya release merge ile gelir
+- `.env` dosyasi asla commit edilmez
+- ESM (import/export) kullanilir, `require()` kullanilmaz
+- Node.js v20.11+ gereklidir (`import.meta.dirname` zorunluluğu)
+- Native `fetch` kullanilir, harici HTTP kutuphanesi eklenmez
+- Yeni ozellikler `.agents/skills/<name>/SKILL.md` altina skill dosyasi ile dokumante edilir
