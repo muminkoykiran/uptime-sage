@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "UptimeResilienceAnalysis",
-  "description": "Codex exec --output-schema icin JSON schema",
+  "description": "JSON schema for codex exec --output-schema",
   "type": "object",
   "additionalProperties": false,
   "required": ["severity", "healthScore", "summary", "telegramMessage", "criticalIssues", "warnings", "actions", "detailedReport"],
@@ -9,18 +9,18 @@
     "severity": {
       "type": "string",
       "enum": ["CRITICAL", "WARNING", "OK"],
-      "description": "Genel sistem severity seviyesi"
+      "description": "Overall system severity level"
     },
     "healthScore": {
       "type": "integer",
       "minimum": 0,
       "maximum": 100,
-      "description": "Genel saglik skoru 0-100"
+      "description": "Overall health score 0-100"
     },
     "summary": {
       "type": "string",
       "maxLength": 500,
-      "description": "Kisa ozet (2-3 cumle)"
+      "description": "Short summary (2-3 sentences)"
     },
     "criticalIssues": {
       "type": "array",
@@ -65,12 +65,12 @@
     "telegramMessage": {
       "type": "string",
       "maxLength": 3800,
-      "description": "Telegram'a gonderilecek Markdown mesaji"
+      "description": "Markdown message to send to Telegram"
     },
     "detailedReport": {
       "type": "string",
       "maxLength": 6000,
-      "description": "Detayli teknik rapor"
+      "description": "Detailed technical report"
     }
   }
 }

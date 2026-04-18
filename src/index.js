@@ -18,6 +18,7 @@ import {
   aggregateStats,
 } from './uptime.js';
 import { analyzeMonitors } from './analyzer.js';
+import { collectDiagnostics } from './ssh-diagnostics.js';
 import { sendMessage, sendErrorAlert, getChatIdForSeverity } from './telegram.js';
 import { loadState, saveState, updateMonitorState, shouldAlert, recordRepeatAlert } from './state.js';
 
@@ -110,6 +111,8 @@ async function run() {
       monitors = await fetchMonitorsViaHttp();
     }
 
+    monitors = monitors.filter(m => m.active !== false);
+
     if (monitors.length === 0) {
       throw new Error('Hicbir monitor verisi alinamadi.');
     }
@@ -143,9 +146,22 @@ async function run() {
       return;
     }
 
-    // 2. Codex CLI ile AI analizi
+    // 2. SSH diagnostics (SSH_DIAGNOSTICS_ENABLED=true ise, DOWN/PENDING monitor'ler icin)
+    // status 0=DOWN, 2=PENDING (son check basarisiz, onay bekleniyor)
+    if (!hasToken && process.env.SSH_DIAGNOSTICS_ENABLED === 'true') {
+      log('[WARN] SSH_DIAGNOSTICS_ENABLED=true ancak public HTTP modunda calisiliyor — monitor taglari yok, SSH diagnostics devre disi');
+    }
+    const downMonitors = monitors.filter(m => m.status === 0 || m.status === 2);
+    const diagnostics = await collectDiagnostics(downMonitors);
+    if (diagnostics.length > 0) {
+      const ok  = diagnostics.filter(d => d.status === 'ok').length;
+      const err = diagnostics.filter(d => d.status === 'error').length;
+      log(`SSH diagnostics tamamlandi: ${ok} host ok, ${err} host hatali`);
+    }
+
+    // 3. Codex CLI ile AI analizi
     log('Codex CLI analiz yapiliyor...');
-    const analysis = await analyzeMonitors(monitors, stats, timestamp, TIMEZONE);
+    const analysis = await analyzeMonitors(monitors, stats, timestamp, TIMEZONE, diagnostics);
     debug('analysis', analysis);
 
     log(`Analiz tamam — Severity: ${analysis.severity} | Score: ${analysis.healthScore}/100`);

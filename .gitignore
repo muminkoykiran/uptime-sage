@@ -1,6 +1,9 @@
 .env
 node_modules/
 *.log
-data/state.json
+data/
 .claude/
 /tmp/codex-analysis-*.json
+config/*.private.md
+config/servers.private.md
+config/monitor-ssh-map.private.json

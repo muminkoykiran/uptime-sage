@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================
-# systemd timer kurulum scripti (Ubuntu / Debian / Linux)
-# Her saat basinda uptime-resilience-agent'i calistirir
-# Kullanim: bash scripts/setup-systemd.sh
+# systemd timer setup script (Ubuntu / Debian / Linux)
+# Runs uptime-resilience-agent at the top of every hour
+# Usage: bash scripts/setup-systemd.sh
 # ============================================================
 
 set -euo pipefail

@@ -5,47 +5,47 @@ description: Analyze Uptime Kuma monitor data from an SRE/resilience perspective
 
 # Resilience Analysis Skill
 
-Monitor verilerini uzman SRE ekibi gibi analiz etmek icin kural seti ve ornekler.
+Rule set and examples for analyzing monitor data the way an expert SRE team would.
 
-## Severity Belirleme Kurallari
+## Severity Determination Rules
 
-| Durum | Severity |
-|-------|----------|
-| Herhangi bir servis DOWN | CRITICAL |
-| 3+ monitor eş zamanlı flapping | CRITICAL |
-| Herhangi bir monitor flapping | WARNING |
-| Ping > 1000ms (kalici) | WARNING |
-| 24s uptime < %99 | WARNING |
-| 30g uptime < %99.9 | WARNING |
-| Tum servisler saglikli, stabil | OK |
+| Condition | Severity |
+|-----------|----------|
+| Any service is DOWN | CRITICAL |
+| 3+ monitors flapping simultaneously | CRITICAL |
+| Any monitor flapping | WARNING |
+| Ping > 1000ms (sustained) | WARNING |
+| 24h uptime < 99% | WARNING |
+| 30d uptime < 99.9% | WARNING |
+| All services healthy and stable | OK |
 
-Belirsiz durumlarda her zaman ust seviyeyi sec.
+When in doubt, always choose the higher severity.
 
-## Analiz Mimarisi
+## Analysis Architecture
 
-`src/analyzer.js` dosyasindaki `analyzeMonitors()` fonksiyonu:
-1. `buildPrompt()` ile monitor verisini yapilandirir
-2. `codex exec --json --sandbox read-only --output-schema` ile analiz yapar
-3. JSONL event stream'den JSON response'u parse eder
-4. Basarisizlik durumunda `buildFallbackAnalysis()` devreye girer
+The `analyzeMonitors()` function in `src/analyzer.js`:
+1. Structures monitor data with `buildPrompt()`
+2. Runs analysis via `codex exec --json --sandbox read-only --output-schema`
+3. Parses the JSON response from the JSONL event stream
+4. Falls back to `buildFallbackAnalysis()` on failure
 
-Detayli kural seti icin `references/severity-rules.md` dosyasina bakin.
+For the full rule set, see `references/severity-rules.md`.
 
-## Cikti Formati
+## Output Format
 
-`config/analysis-schema.json` sema dosyasina uygun JSON:
+JSON conforming to the `config/analysis-schema.json` schema:
 
 ```json
 {
   "severity": "CRITICAL",
   "healthScore": 72,
-  "summary": "2 kritik servis 15 dakikadir kapali...",
+  "summary": "2 critical services have been down for 15 minutes...",
   "criticalIssues": [
     {
       "monitor": "API Gateway",
-      "issue": "HTTP 502 — 15 dakikadir DOWN",
-      "impact": "Tum API istekleri basarisiz",
-      "action": "Pod loglarini kontrol et"
+      "issue": "HTTP 502 — DOWN for 15 minutes",
+      "impact": "All API requests are failing",
+      "action": "Check pod logs"
     }
   ],
   "warnings": [...],
@@ -55,18 +55,18 @@ Detayli kural seti icin `references/severity-rules.md` dosyasina bakin.
 }
 ```
 
-## Prompt Ozelleştirme
+## Prompt Customization
 
-`src/analyzer.js` icerisindeki `buildPrompt()` fonksiyonuna ek baglamlar eklenebilir:
+Additional context can be added to the `buildPrompt()` function in `src/analyzer.js`:
 
 ```javascript
-// Kritik servis listesi
-// SLA gereksinimleri
-// Eskalasyon proseduru
+// Critical service list
+// SLA requirements
+// Escalation procedure
 ```
 
-## Model Secimi
+## Model Selection
 
-Model, `~/.codex/config.toml` icerisindeki `model` ayari ile belirlenir.
-Bu ajanin `.codex/config.toml` dosyasinda varsayilan olarak `gpt-5.4` ayarlidir.
-`model_reasoning_effort = "high"` aktiftir — analiz kalitesi onceliklidir.
+The model is determined by the `model` setting in `~/.codex/config.toml`.
+This agent's `.codex/config.toml` defaults to `gpt-5.4`.
+`model_reasoning_effort = "high"` is active — analysis quality is the priority.

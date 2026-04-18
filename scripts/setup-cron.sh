@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================
-# Cron job kurulum scripti (Linux veya macOS)
-# Her saat basinda calistirir
-# Kullanim: bash scripts/setup-cron.sh
+# Cron job setup script (Linux or macOS)
+# Runs the agent at the top of every hour
+# Usage: bash scripts/setup-cron.sh
 # ============================================================
 
 set -euo pipefail
