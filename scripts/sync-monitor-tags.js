@@ -78,11 +78,18 @@ async function main() {
   const socket = await connectSocketIO();
   const { monitorList } = await fetchAllMonitors(socket);
 
-  // ── Global tag list ──────────────────────────────────────────────────────
-  const { tags: globalTags } = await emitAsync(socket, 'getTagList');
-  const tagByName = Object.fromEntries(globalTags.map(t => [t.name, t]));
+  // ── Global tag ID map — built from existing monitor tags ────────────────
+  // More reliable than getTagList (which may not be available in all versions).
+  const tagByName = {};
+  for (const monitor of Object.values(monitorList)) {
+    for (const t of (monitor.tags || [])) {
+      if (t.name && !tagByName[t.name]) {
+        tagByName[t.name] = { id: t.tag_id ?? t.id, name: t.name, color: t.color };
+      }
+    }
+  }
 
-  // Ensure all ssh-* global tags exist
+  // Ensure all needed ssh-* global tags exist (create any that are missing)
   for (const [name, color] of Object.entries(SSH_TAG_COLORS)) {
     if (!tagByName[name]) {
       if (isDry) {

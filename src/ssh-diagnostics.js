@@ -82,8 +82,9 @@ function validateVar(name, value, rules) {
 }
 
 // Template string'ini dogrulanmis degiskenlerle doldurur
+// Negative lookbehind: %{...} curl format specifiers are skipped
 function substituteTemplate(tmpl, vars, rules) {
-  return tmpl.replace(/\{(\w+)\}/g, (match, name) => {
+  return tmpl.replace(/(?<!%)\{(\w+)\}/g, (match, name) => {
     const value = vars[name];
     if (!value) throw new Error(`Eksik template degiskeni: ${name}`);
     if (!validateVar(name, value, rules)) {
@@ -117,12 +118,13 @@ async function runRemoteCommand(sshArgs, cmd, maxChars, timeout) {
 
 // Bir host icin tum diagnostic'leri topla
 async function diagnoseHost(hostInfo, config) {
-  const { host, port, user, keyPath, type, serviceId, monitors } = hostInfo;
+  const { host, port, user, keyPath, services, monitors } = hostInfo;
   const sshUser = user || process.env.SSH_USER || process.env.USER || 'ubuntu';
   const sshPort = String(port || 22);
   const sshKey  = keyPath || process.env.SSH_KEY_PATH || `${process.env.HOME}/.ssh/id_rsa`;
 
-  dbg(`[SSH] Baglanti: ${sshUser}@${host}:${sshPort} — monitor(ler): ${monitors.join(', ')} — tip: ${type || 'general'}`);
+  const typesSummary = services.map(s => s.type || 'general').join(', ');
+  dbg(`[SSH] Baglanti: ${sshUser}@${host}:${sshPort} — monitor(ler): ${monitors.join(', ')} — tip: ${typesSummary}`);
 
   // Known hosts kontrolu
   if (!isHostKnown(host, sshPort)) {
@@ -147,29 +149,52 @@ async function diagnoseHost(hostInfo, config) {
   ];
 
   const { templates, var_rules, timeout_seconds, max_output_chars } = config;
-  const vars = { service: serviceId, container: serviceId, port: serviceId };
-
-  // Her zaman 'general' template calisir
-  const typesToRun = ['general'];
-  if (type && templates[type]) typesToRun.unshift(type);
-
   const commands = [];
-  for (const ttype of typesToRun) {
-    for (const entry of (templates[ttype] || [])) {
-      let cmd;
-      try {
-        cmd = substituteTemplate(entry.cmd, vars, var_rules);
-      } catch (err) {
-        commands.push({ type: ttype, label: entry.label, output: `[VALIDATION_ERROR: ${err.message}]` });
-        continue;
-      }
-      dbg(`[SSH] ${host} → [${ttype}] ${entry.label}`);
-      const t0 = Date.now();
-      const output = await runRemoteCommand(sshFlags, cmd, max_output_chars, timeout_seconds);
-      const elapsed = Date.now() - t0;
-      dbg(`[SSH] ${host} → ${output.startsWith('[') ? output.split('\n')[0] : `OK (${elapsed}ms)`}`);
-      commands.push({ type: ttype, label: entry.label, output });
+  let connectionDead = false;
+
+  // Tek bir template entry'sini çalıştır, sonucu commands'a ekle
+  const runEntry = async (type, entry, vars, monitorName) => {
+    if (connectionDead) {
+      commands.push({ type, ...(monitorName && { monitor: monitorName }), label: entry.label, output: '[SKIPPED: baglanti basarisiz]' });
+      return;
     }
+    let cmd;
+    try {
+      cmd = substituteTemplate(entry.cmd, vars, var_rules);
+    } catch (err) {
+      commands.push({ type, ...(monitorName && { monitor: monitorName }), label: entry.label, output: `[VALIDATION_ERROR: ${err.message}]` });
+      return;
+    }
+    const label = monitorName ? `${entry.label} (${monitorName})` : entry.label;
+    dbg(`[SSH] ${host} → [${type}] ${label}`);
+    const t0 = Date.now();
+    const output = await runRemoteCommand(sshFlags, cmd, max_output_chars, timeout_seconds);
+    const elapsed = Date.now() - t0;
+    // SSH connectivity failure (ConnectTimeout veya bizim SIGKILL timeout'u) — sonraki komutları deneme
+    if (output.startsWith('[stderr] ssh:') || output.startsWith('[TIMEOUT:')) {
+      connectionDead = true;
+    }
+    dbg(`[SSH] ${host} → ${output.startsWith('[') ? output.split('\n')[0] : `OK (${elapsed}ms)`}`);
+    commands.push({ type, ...(monitorName && { monitor: monitorName }), label: entry.label, output });
+  };
+
+  for (const { type, serviceId, monitorName } of services) {
+    if (!type || !templates[type]) continue;
+    const vars = { service: serviceId, container: serviceId, port: serviceId };
+    for (const entry of templates[type]) await runEntry(type, entry, vars, monitorName);
+  }
+
+  for (const entry of (templates['general'] || [])) {
+    await runEntry('general', entry, {}, null);
+  }
+
+  if (connectionDead) {
+    const firstFail = commands.find(c => c.output.startsWith('[stderr] ssh:') || c.output.startsWith('[TIMEOUT:'));
+    return {
+      host, monitors, status: 'error',
+      reason: firstFail?.output.replace('[stderr] ', '') ?? 'SSH baglantisi kurulamadi',
+      commands,
+    };
   }
 
   return { host, monitors, status: 'ok', commands };
@@ -195,6 +220,7 @@ export async function collectDiagnostics(downMonitors) {
   }
 
   // ssh-host tag'i olan monitor'leri grupla (host bazinda dedup)
+  // Each host stores all distinct (type, serviceId) pairs across its DOWN monitors.
   const hostMap = new Map(); // host → hostInfo
   for (const m of downMonitors) {
     const tags = tagMap(m.tags);
@@ -204,19 +230,25 @@ export async function collectDiagnostics(downMonitors) {
     if (!hostMap.has(host)) {
       hostMap.set(host, {
         host,
-        port:      tags['ssh-port'] || '22',
-        user:      tags['ssh-user'] || null,
-        keyPath:   null,
-        type:      tags['ssh-type'] || null,
-        serviceId: tags['ssh-service'] || null,
-        monitors:  [],
+        port:     tags['ssh-port'] || '22',
+        user:     tags['ssh-user'] || null,
+        keyPath:  null,
+        services: [], // [{type, serviceId, monitorName}]
+        monitors: [],
       });
     }
-    hostMap.get(host).monitors.push(m.name);
-    // İlk DOWN monitor'un type/service'ini kullan (daha fazlasi varsa genel diagnostic yeterli)
     const info = hostMap.get(host);
-    if (!info.type && tags['ssh-type']) info.type = tags['ssh-type'];
-    if (!info.serviceId && tags['ssh-service']) info.serviceId = tags['ssh-service'];
+    info.monitors.push(m.name);
+
+    const type      = tags['ssh-type'] || null;
+    const serviceId = tags['ssh-service'] || null;
+    // Add this service if it has a type and isn't already present
+    if (type && serviceId) {
+      const key = `${type}:${serviceId}`;
+      if (!info.services.some(s => `${s.type}:${s.serviceId}` === key)) {
+        info.services.push({ type, serviceId, monitorName: m.name });
+      }
+    }
   }
 
   if (hostMap.size === 0) return [];

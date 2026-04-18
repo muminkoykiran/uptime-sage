@@ -162,24 +162,6 @@ export function fetchAllMonitors(socket) {
   });
 }
 
-// ─── Aksiyon alma (JWT gerektirir) ───────────────────────────────────────────
-
-// FIX: copy-paste yerine paylasilan helper
-function emitAction(socket, event, monitorId, errorPrefix) {
-  return new Promise((resolve, reject) => {
-    socket.emit(event, monitorId, (res) => {
-      if (res.ok) resolve(res);
-      else reject(new Error(`${errorPrefix} (${monitorId}): ${res.msg}`));
-    });
-  });
-}
-
-export const pauseMonitor = (socket, id) =>
-  emitAction(socket, 'pauseMonitor', id, 'Monitor duraklatma basarisiz');
-
-export const resumeMonitor = (socket, id) =>
-  emitAction(socket, 'resumeMonitor', id, 'Monitor baslatma basarisiz');
-
 // ─── Veri isleme ─────────────────────────────────────────────────────────────
 
 export function parseSocketMonitors(monitorList, heartbeatList) {
@@ -221,6 +203,7 @@ export function parsePublicMonitors(pageData) {
         type: monitor.type,
         url: monitor.url || null,
         group: group.name,
+        tags: [],
         active: true,
         status: latest?.status ?? -1,
         statusText: statusLabel(latest?.status),

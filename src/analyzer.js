@@ -54,60 +54,70 @@ const _isDebug = process.argv.includes('--debug');
 const _tz = () => process.env.TIMEZONE || 'UTC';
 const _now = () => new Date().toLocaleTimeString('tr-TR', { timeZone: _tz() });
 
-export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UTC', diagnostics = []) {
-  const codexBin = process.env.CODEX_BIN || 'codex';
-  const prompt = buildPrompt(monitors, stats, timestamp, timezone, diagnostics);
-
-  // Gecici output dosyasi — --output-last-message ile temiz JSON cikti
-  const outFile = join(tmpdir(), `codex-analysis-${randomUUID()}.json`);
-
-  // Progress ticker — her 30s'de bir satir (Codex uzun surer, geri yazmasin)
+// Tek bir Codex denemesi: spawn → parse → result veya null (spawn hatası fırlatır)
+async function attemptCodex(codexBin, prompt, outFile, timeout) {
   const spawnMs = Date.now();
+  let lastEventMs = spawnMs;
   const progressTimer = setInterval(() => {
-    const s = Math.round((Date.now() - spawnMs) / 1000);
-    console.log(`[${_now()}] Codex CLI çalışıyor... (${s}s)`);
+    const now = Date.now();
+    const quietSec = Math.round((now - lastEventMs) / 1000);
+    if (quietSec >= 25) console.log(`[${_now()}] [CODEX] Muhakeme yapılıyor... (${Math.round((now - spawnMs) / 1000)}s)`);
   }, 30_000);
   const clearProgress = () => clearInterval(progressTimer);
 
-  // Debug modunda Codex stderr'ini canli yaz (başlangıç hataları burada çıkar)
-  const onStderr = _isDebug ? (chunk) => {
+  const onStderr = (chunk) => {
     for (const line of chunk.split('\n')) {
-      if (line.trim()) process.stdout.write(`\r[CODEX] ${line.trim()}\n`);
+      if (line.trim()) console.log(`[${_now()}] [CODEX:err] ${line.trim()}`);
     }
-  } : undefined;
+  };
 
-  let stdout, stderr;
+  const _JBUF_MAX = 512 * 1024;
+  let _jBuf = '';
+  const onStdout = (chunk) => {
+    lastEventMs = Date.now();
+    _jBuf += chunk;
+    if (_jBuf.length > _JBUF_MAX) _jBuf = _jBuf.slice(-_JBUF_MAX);
+    const lines = _jBuf.split('\n');
+    _jBuf = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let ev;
+      try { ev = JSON.parse(line); } catch { continue; }
+      const t = ev.type;
+      const item = ev.item ?? {};
+      if (t === 'turn.started') {
+        console.log(`[${_now()}] [CODEX] Analiz başladı`);
+      } else if (t === 'item.started' && item.type === 'command_execution') {
+        const cmd = String(item.command ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+        if (cmd) console.log(`[${_now()}] [CODEX] $ ${cmd}`);
+      } else if (t === 'item.completed' && item.type === 'command_execution') {
+        if (_isDebug) console.log(`[${_now()}] [CODEX] exit=${item.exit_code ?? '?'}`);
+      } else if (t === 'item.completed' && item.type === 'agent_message') {
+        console.log(`[${_now()}] [CODEX] Yanıt oluşturuldu`);
+      } else if (t === 'turn.completed') {
+        console.log(`[${_now()}] [CODEX] Analiz tamamlandı`);
+      } else if (_isDebug && t && t !== 'thread.started') {
+        console.log(`[${_now()}] [CODEX:ev] ${t}`);
+      }
+    }
+  };
+
+  let stdout;
   try {
-    ({ stdout, stderr } = await spawnAsync(
+    ({ stdout } = await spawnAsync(
       codexBin,
-      [
-        'exec',
-        '--json',
-        '--ephemeral',
-        '--skip-git-repo-check',
-        '--sandbox', 'read-only',
-        '--output-schema', SCHEMA_PATH,
-        '--output-last-message', outFile,
-        prompt,
-      ],
-      { cwd: ROOT, timeout: 180_000, killSignal: 'SIGKILL', onStderr }
+      ['exec', '--json', '--ephemeral', '--skip-git-repo-check',
+       '--sandbox', 'read-only', '--output-schema', SCHEMA_PATH,
+       '--output-last-message', outFile, prompt],
+      { cwd: ROOT, timeout, killSignal: 'SIGKILL', onStdout, onStderr }
     ));
     clearProgress();
   } catch (err) {
     clearProgress();
-    const detail = [
-      err.stderr?.slice(0, 500) || err.message,
-      err.code ? `code=${err.code}` : '',
-      err.signal ? `signal=${err.signal}` : '',
-    ].filter(Boolean).join(' | ');
-
-    console.error(`codex exec hatasi: ${detail}`);
-    if (_isDebug && stdout) console.error(`[DEBUG] codex stdout (son 500 karakter):\n${stdout.slice(-500)}`);
     cleanupTmpFile(outFile);
-    return buildFallbackAnalysis(stats);
+    throw err;
   }
 
-  // 1. Oncelik: --output-last-message dosyasi (en guvenilir)
   if (existsSync(outFile)) {
     try {
       const fileContent = readFileSync(outFile, 'utf8').trim();
@@ -116,32 +126,49 @@ export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UT
         const parsed = JSON.parse(fileContent);
         if (isValidAnalysis(parsed)) return parsed;
       }
-    } catch { /* dosya parse edilemedi, JSONL'e fallback */ }
+    } catch { /* JSONL'e geç */ }
   }
 
   cleanupTmpFile(outFile);
 
-  // 2. --json JSONL event stream parse
   const raw = stdout.trim();
   if (raw) {
     const fromJsonl = parseJsonlOutput(raw);
     if (fromJsonl) return fromJsonl;
   }
 
-  // 3. Son care: ham stdout'u duz JSON olarak dene
-  if (raw) {
-    const lines = raw.split('\n');
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (!line.startsWith('{')) continue;
-      try {
-        const parsed = JSON.parse(line);
-        if (isValidAnalysis(parsed)) return parsed;
-      } catch { /* devam */ }
+  return null;
+}
+
+export async function analyzeMonitors(monitors, stats, timestamp, timezone = 'UTC', diagnostics = []) {
+  const codexBin = process.env.CODEX_BIN || 'codex';
+  const prompt = buildPrompt(monitors, stats, timestamp, timezone, diagnostics);
+  // SSH diagnostics prompt'u büyütür — daha fazla süre ver
+  const timeout = diagnostics.length > 0 ? 240_000 : 180_000;
+  const MAX_ATTEMPTS = 2;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    if (attempt > 1) {
+      console.log(`[${_now()}] [CODEX] Yeniden deneniyor (${attempt}/${MAX_ATTEMPTS})...`);
+      await new Promise(r => setTimeout(r, 3_000));
+    }
+
+    const outFile = join(tmpdir(), `codex-analysis-${randomUUID()}.json`);
+    try {
+      const result = await attemptCodex(codexBin, prompt, outFile, timeout);
+      if (result) return result;
+      console.error(`[${_now()}] [CODEX] Deneme ${attempt}: geçerli JSON üretilemedi`);
+    } catch (err) {
+      const detail = [
+        err.stderr?.slice(0, 300) || err.message,
+        err.signal ? `signal=${err.signal}` : '',
+      ].filter(Boolean).join(' | ');
+      console.error(`[${_now()}] [CODEX] Deneme ${attempt} hatası: ${detail}`);
+      if (_isDebug) console.error(`[DEBUG] stderr:\n${err.stderr?.slice(-500) ?? ''}`);
     }
   }
 
-  console.error(`Gecerli analiz JSON bulunamadi. Stderr: ${stderr?.slice(0, 300) ?? ''}`);
+  console.error(`[${_now()}] [CODEX] ${MAX_ATTEMPTS} deneme başarısız — fallback`);
   return buildFallbackAnalysis(stats);
 }
 
@@ -179,22 +206,24 @@ function buildFallbackAnalysis(stats) {
 function buildFallbackMessage(stats) {
   const icon = stats.down > 0 ? '🔴' : (stats.slowMonitors?.length > 0 ? '🟡' : '🟢');
   const severity = stats.down > 0 ? 'CRITICAL' : (stats.slowMonitors?.length > 0 ? 'WARNING' : 'OK');
+  const now = new Date().toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const pingPart = stats.avgPing != null ? ` | Ping: ${stats.avgPing}ms` : '';
   const lines = [
-    `${icon} *${severity}* — Uptime Raporu _(fallback)_`,
+    `${icon} ${severity} | ${now} _(fallback)_`,
     '',
-    `📊 *${stats.total} monitor* | ${stats.up}✅ ${stats.down > 0 ? stats.down + '🔴' : '0🔴'} | Sağlık: ${stats.healthScore}/100${stats.avgPing != null ? ` | Ping ort: ${stats.avgPing}ms` : ''}`,
+    `📊 ${stats.total} mon | ${stats.up}✅ ${stats.down}🔴 | Sağlık: ${stats.healthScore}${pingPart}`,
   ];
   if (stats.downMonitors.length > 0) {
     lines.push('', '🚨 *Kritik*');
     for (const name of stats.downMonitors) lines.push(`• *${name}* — DOWN`);
   }
   if (stats.slowMonitors?.length > 0) {
-    lines.push('', '⚠️ *Yavaş*');
-    for (const entry of stats.slowMonitors) lines.push(`• ${entry}`);
+    lines.push('', `⚠️ ${stats.slowMonitors.join(', ')} — yüksek ping`);
   }
-  const upNames = stats.total - stats.down - (stats.slowMonitors?.length ?? 0);
-  if (upNames > 0 && stats.down === 0 && !stats.slowMonitors?.length) {
-    lines.push('', `✅ Tüm servisler normal`);
+  const normalCount = stats.up - (stats.slowMonitors?.length ?? 0);
+  if (normalCount > 0) lines.push('', `✅ ${normalCount} normal`);
+  if (stats.down > 0) {
+    lines.push('', `💡 *Özet*\n${stats.down} monitor DOWN — AI analizi yapılamadı, Uptime Kuma panelini kontrol edin.`);
   }
   return lines.join('\n');
 }
@@ -318,40 +347,66 @@ detailedReport: Teknik SRE özeti. Trend analizi, flapping pattern, ping yorumu,
 
 ─── TELEGRAM MESAJI ───
 Türkçe. Telegram Markdown: *bold* _italic_ \`kod\`. Maks 3800 karakter.
-Sağlıklı monitörleri tek satırda grupla, tek tek açıklama yapma.
+
+Format kuralları:
+- Header tek satır: severity ve timestamp inline (örn: "🔴 CRITICAL | 18 Nis 20:45")
+- Stats: "📊 N mon | N✅ N🔴 | Sağlık: N | Ping: Nms" (Ping yoksa atla)
+- Kritik sorunları sunucu/host adına göre grupla. SSH diagnostics varsa host adresini, yoksa monitor adındaki ortak önek/grup bilgisini kullan.
+- Grup başlığı: "🚨 *sunucu_adı*" (bold)
+- Her sorun: "• *MonitorAdı* — kısa açıklama (max 70 karakter, teknik detay yeterli)"
+- Uyarılar: "⚠️ Ad1, Ad2 — kısa neden"
+- Sağlıklılar: sadece "✅ N normal" (isim listesi yok)
+- Özet bölümünden önce 🔧 *Aksiyonlar* bölümü ekle (sadece CRITICAL ve WARNING'de, OK'de atla): HIGH öncelikli aksiyonları göster, max 3 madde. Komut varsa \`komut\` formatında yaz, yoksa sadece açıklama. Her madde "• açıklama — \`komut\`" veya sadece "• açıklama" formatında.
+- En sona 💡 *Özet* bölümü ekle: SSH bulgularını ve kök neden tahminini 2-3 cümlede sentezle. Hangi sunucuda ne tür sorun olduğunu ve öncelik sırasını belirt. Teknik ama sade.
 
 ÖRNEK — CRITICAL:
-🔴 *CRITICAL* — Uptime Raporu
-_${timestamp}_
+🔴 CRITICAL | 18 Nis 20:45
 
-📊 *5 monitor* | 4✅ 1🔴 | Sağlık: 80/100 | Ping ort: 245ms
+📊 28 mon | 21✅ 7🔴 | Sağlık: 65 | Ping: 352ms
 
-🚨 *Kritik*
-• *API Server* — 23 dk DOWN
-  ↳ Son hata: "connection refused" — sunucu/port kontrol edin
+🚨 *master*
+• *API Server* — port 8082 kapalı, süreç yok
+• *Auth Service* — systemd unit bulunamadı
 
-⚠️ *Uyarı*
-• *Web Frontend* — Yüksek ping: 1.340ms (son 5 kontrol)
+🚨 *slave3*
+• *FinancialGPT* — servis ayakta, health FAILURE, WebSocket hataları
+• *XSS* — Exited(137) 18sa, 404
 
-✅ Database, Cache, Queue — normal
+🚨 *jetson*
+• *Homebridge* — reboot sonrası 502, container yok
+
+⚠️ FinancialGPT, CandyTrader — %84 uptime, kronik sağlık sorunu
+
+✅ 21 normal
+
+🔧 *Aksiyonlar*
+• jetson'da Homebridge container'ı başlat — \`ssh user@host "docker start homebridge"\`
+• slave3'te FinancialGPT yeniden başlat — \`ssh user@host "systemctl restart FinancialGPT.service"\`
+• XSS container'ını başlat — \`ssh user@host "docker start xss"\`
+
+💡 *Özet*
+master'da süreç/deploy eksikliği (port dinleyici yok), slave3'te uygulama sağlık arızası (exchange timeout), jetson'da reboot sonrası container başlamamış. Öncelik: master ve jetson'da manuel restart, slave3'te exchange bağlantısı incelemesi.
 
 ÖRNEK — WARNING:
-🟡 *WARNING* — Uptime Raporu
-_${timestamp}_
+🟡 WARNING | 18 Nis 20:45
 
-📊 *5 monitor* | 5✅ 0🔴 | Sağlık: 92/100 | Ping ort: 890ms
+📊 5 mon | 5✅ 0🔴 | Sağlık: 92 | Ping: 890ms
 
-⚠️ *Uyarı*
-• *API Server* — Kararsız (flapping): 1 saatte 6 geçiş
-• *CDN* — 24s uptime %97.2 (eşik: %99)
+⚠️ *API Server* — flapping, 1 saatte 6 geçiş
+⚠️ *CDN* — 24s uptime %97.2
 
-✅ Database, Cache, Queue, Auth — normal
+✅ 3 normal
+
+🔧 *Aksiyonlar*
+• API Server loglarını kontrol et — \`ssh user@host "journalctl -u api-server -n 50"\`
+
+💡 *Özet*
+API Server kararsız davranıyor; CDN uptime eşiğin altında. Ani kesinti yok, izleme yeterli.
 
 ÖRNEK — OK:
-🟢 *OK* — Uptime Raporu
-_${timestamp}_
+🟢 OK | 18 Nis 20:45
 
-📊 *5 monitor* | 5✅ 0🔴 | Sağlık: 100/100 | Ping ort: 145ms
+📊 5 mon | 5✅ 0🔴 | Sağlık: 100 | Ping: 145ms
 
-✅ Tüm servisler normal: API, Web, Database, Cache, Queue`;
+✅ 5 normal`;
 }

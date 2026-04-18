@@ -111,6 +111,8 @@ async function run() {
       monitors = await fetchMonitorsViaHttp();
     }
 
+    monitors = monitors.filter(m => m.active !== false);
+
     if (monitors.length === 0) {
       throw new Error('Hicbir monitor verisi alinamadi.');
     }
@@ -146,6 +148,9 @@ async function run() {
 
     // 2. SSH diagnostics (SSH_DIAGNOSTICS_ENABLED=true ise, DOWN/PENDING monitor'ler icin)
     // status 0=DOWN, 2=PENDING (son check basarisiz, onay bekleniyor)
+    if (!hasToken && process.env.SSH_DIAGNOSTICS_ENABLED === 'true') {
+      log('[WARN] SSH_DIAGNOSTICS_ENABLED=true ancak public HTTP modunda calisiliyor — monitor taglari yok, SSH diagnostics devre disi');
+    }
     const downMonitors = monitors.filter(m => m.status === 0 || m.status === 2);
     const diagnostics = await collectDiagnostics(downMonitors);
     if (diagnostics.length > 0) {
