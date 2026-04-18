@@ -1,11 +1,11 @@
 /**
- * Uptime Kuma JWT Token Alma Araci
+ * Uptime Kuma JWT Token Retrieval Tool
  *
- * Kullanim:
+ * Usage:
  *   node scripts/get-jwt-token.js <username> <password> [2fa-token]
  *
- * Cikan token'i .env dosyasina UPTIME_KUMA_TOKEN olarak ekle.
- * Token expire olmuyor — bir kez alman yeterli.
+ * Add the resulting token to your .env file as UPTIME_KUMA_TOKEN.
+ * The token does not expire — you only need to run this once.
  */
 
 import { io } from 'socket.io-client';

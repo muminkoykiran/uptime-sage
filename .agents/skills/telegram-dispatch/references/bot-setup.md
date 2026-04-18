@@ -1,31 +1,31 @@
 # Telegram Bot Setup Reference
 
-## Bot Olusturma
+## Creating a Bot
 
-1. Telegram'da `@BotFather`'a git
-2. `/newbot` komutu gonder
-3. Bot adi ve kullanici adi belirle
-4. Token al: `123456789:AAF...`
-5. `.env` dosyasina ekle: `TELEGRAM_BOT_TOKEN=<token>`
+1. Open Telegram and search for `@BotFather`
+2. Send the `/newbot` command
+3. Choose a display name and username for the bot
+4. Copy the token provided: `123456789:AAF...`
+5. Add it to `.env`: `TELEGRAM_BOT_TOKEN=<token>`
 
-## Chat ID Bulma
+## Finding a Chat ID
 
-**Kisisel:**
+**Personal:**
 ```
-@userinfobot'a /start yaz → ID'ni gonderir
-```
-
-**Grup:**
-```
-1. Gruba @getidsbot ekle
-2. /id komutunu gonder
-3. Grup ID'si negatif olur: -123456789
+Send /start to @userinfobot → it replies with your user ID
 ```
 
-**Kanal:**
+**Group:**
 ```
-Kanal username'ini dogrudan kullan: @kanaladi
-veya: kanal ayarlarindan ID'yi al (negatif: -100...)
+1. Add @getidsbot to the group
+2. Send the /id command
+3. Group IDs are negative: -123456789
+```
+
+**Channel:**
+```
+Use the channel username directly: @channelname
+or: retrieve the ID from channel settings (negative: -100...)
 ```
 
 ## API Endpoint
@@ -42,7 +42,7 @@ Content-Type: application/json
 }
 ```
 
-## Cok Alici Gonderimi
+## Sending to Multiple Recipients
 
 ```javascript
 import { sendMessage } from './src/telegram.js';
@@ -55,9 +55,9 @@ for (const chatId of chatIds) {
 
 ## Rate Limits
 
-Telegram Bot API limitleri:
-- Gruba: max 20 mesaj/dakika
-- Kanala: max 20 mesaj/dakika
-- Kullaniciya: max 1 mesaj/saniye
+Telegram Bot API limits:
+- Group: max 20 messages/minute
+- Channel: max 20 messages/minute
+- Individual user: max 1 message/second
 
-`telegram.js` HTTP 429 yaniti alinca `Retry-After` header'a gore otomatik bekler.
+`telegram.js` automatically waits according to the `Retry-After` header when it receives an HTTP 429 response.

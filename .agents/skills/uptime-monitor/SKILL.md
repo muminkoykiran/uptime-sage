@@ -5,27 +5,27 @@ description: Query Uptime Kuma for service status, heartbeat data, and uptime me
 
 # Uptime Monitor Skill
 
-Uptime Kuma monitoring sistemini sorgulamak ve yonetmek icin kullanilir.
+Used to query and interact with the Uptime Kuma monitoring system.
 
-## Instance Bilgileri
+## Instance Configuration
 
-- URL: `$UPTIME_KUMA_URL` (.env'den okunur — zorunlu)
-- API Tipi: Public HTTP (status page) + Socket.IO (JWT ile yonetim)
-- Timezone: `$TIMEZONE` (.env'den okunur — default: UTC)
+- URL: `$UPTIME_KUMA_URL` (read from `.env` — required)
+- API Type: Public HTTP (status page) + Socket.IO (management via JWT)
+- Timezone: `$TIMEZONE` (read from `.env` — default: UTC)
 
-## Public Endpoint'ler (Auth Gerektirmez)
+## Public Endpoints (No Auth Required)
 
 ```bash
-# Tum status sayfalari
+# List all status pages
 curl "$UPTIME_KUMA_URL/api/status-page/list"
 
-# Belirli bir sayfanin detaylari
+# Details for a specific page
 curl "$UPTIME_KUMA_URL/api/status-page/default"
 ```
 
-Detayli API referansi icin `references/api-endpoints.md` dosyasina bakin.
+For the full API reference, see `references/api-endpoints.md`.
 
-## Kod Ile Sorgulama
+## Querying via Code
 
 ```javascript
 import { fetchStatusPageList, fetchPublicStatus, parsePublicMonitors, aggregateStats } from './src/uptime.js';
@@ -35,26 +35,26 @@ const pageData = await fetchPublicStatus('default');
 const monitors = parsePublicMonitors(pageData);
 const stats = aggregateStats(monitors);
 
-console.log(`UP: ${stats.up}/${stats.total} | Saglik: ${stats.healthScore}/100`);
+console.log(`UP: ${stats.up}/${stats.total} | Health: ${stats.healthScore}/100`);
 ```
 
-Ornek sorgu scripti icin `scripts/query-monitors.js` dosyasina bakin.
+For an example query script, see `scripts/query-monitors.js`.
 
-## Uptime Hesaplama
+## Uptime Calculation
 
-`uptimeList["monitorId_24"]` degeri 0-1 arasi float:
-- `0.998` = %99.8 uptime (son 24 saat)
-- `0.995` = %99.5 uptime (son 720 saat / 30 gun)
+The `uptimeList["monitorId_24"]` value is a float between 0 and 1:
+- `0.998` = 99.8% uptime (last 24 hours)
+- `0.995` = 99.5% uptime (last 720 hours / 30 days)
 
-## Status Degerleri
+## Status Values
 
 - `0` = DOWN
 - `1` = UP
 - `2` = PENDING
 - `3` = MAINTENANCE
 
-## Socket.IO (JWT gerektirir)
+## Socket.IO (JWT Required)
 
-JWT token ile tam erisim: `src/uptime.js` icerisindeki `connectSocketIO()` fonksiyonu kullanilir.
-Token yoksa public HTTP API'ye otomatik fallback yapilir.
-Token alma: `node scripts/get-jwt-token.js <username> <password>`
+Full access with a JWT token: use the `connectSocketIO()` function in `src/uptime.js`.
+If no token is present, the client automatically falls back to the public HTTP API.
+To obtain a token: `node scripts/get-jwt-token.js <username> <password>`
