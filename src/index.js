@@ -139,8 +139,8 @@ async function run() {
     log(`${monitors.length} monitor | UP: ${stats.up} | DOWN: ${stats.down} | Saglik: ${stats.healthScore}/100`);
     debug('stats', stats);
 
-    if (!needsAlert && stats.down > 0) {
-      log('Bilinen sorunlar devam ediyor, alert gonderilmiyor');
+    if (!needsAlert) {
+      log('Hicbir degisiklik yok, Telegram atlanıyor');
       saveState(state);
       log(`Agent tamamlandi (${Date.now() - startMs}ms)`);
       return;
