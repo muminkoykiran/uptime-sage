@@ -1,6 +1,8 @@
 /**
- * Stop hook — Codex oturumu tamamlandiginda veya beklenmedik sekilde kapandiginda calisir.
- * CRITICAL durumunda Telegram'a dogrudan bildirim gonderir (Codex exec crash fallback).
+ * Stop hook — Codex oturumu kapandiginda calisir.
+ *
+ * Normal kosulda: last_assistant_message = analysis JSON → index.js zaten Telegram'a gonderdi,
+ * buradan tekrar gonderme. Sadece JSON parse edilemiyorsa (Codex crash/timeout) alert gonder.
  */
 
 let input = '';
@@ -9,14 +11,20 @@ for await (const chunk of process.stdin) input += chunk;
 let event = {};
 try { event = JSON.parse(input); } catch { /* stdin bos veya parse edilemiyor */ }
 
-const lastMsg = event.last_assistant_message || '';
-const isCritical = /CRITICAL/i.test(lastMsg);
+const lastMsg = (event.last_assistant_message || '').trim();
 
-// Sadece dogrudan Telegram bildirimi gereken durumlar: beklenmedik sonlanma
-// Normal CRITICAL durumlar zaten src/index.js tarafindan Telegram'a gonderiliyor.
-// Bu hook, codex exec'in kendisi crash yaparsa devreye girer.
-if (isCritical && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
-  const text = `Uptime Agent — Codex oturumu CRITICAL ile kapandi.\n\n${lastMsg.slice(0, 400)}`;
+// lastMsg parseable JSON ise → normal run tamamlandi, index.js halletti
+let isNormalCompletion = false;
+try {
+  if (lastMsg) {
+    JSON.parse(lastMsg);
+    isNormalCompletion = true;
+  }
+} catch { /* JSON degil — Codex crash olabilir */ }
+
+if (!isNormalCompletion && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
+  const preview = lastMsg ? lastMsg.slice(0, 300) : '(cikti yok)';
+  const text = `⚠️ Uptime Agent — Codex oturumu beklenmedik sekilde kapandi.\n\n${preview}`;
   try {
     await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
