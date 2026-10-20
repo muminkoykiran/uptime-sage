@@ -20,10 +20,17 @@ SERVICE_USER="$(stat -c '%U' "$AGENT_DIR")"
 SERVICE_DIR="/etc/systemd/system"
 SERVICE_NAME="uptime-resilience-agent"
 LOG_DIR="/var/log/${SERVICE_NAME}"
+# agy genelde ~/.local/bin altindadir; systemd'nin varsayilan PATH'inde yoktur.
+SERVICE_HOME="$(getent passwd "$SERVICE_USER" | cut -d: -f6)"
+AGY_PATH="$(command -v agy 2>/dev/null || true)"
+[ -z "$AGY_PATH" ] && [ -x "$SERVICE_HOME/.local/bin/agy" ] && AGY_PATH="$SERVICE_HOME/.local/bin/agy"
+AGY_ENV_LINE=""
+[ -n "$AGY_PATH" ] && AGY_ENV_LINE="Environment=AGY_BIN=${AGY_PATH}"
 
 echo "Proje dizini: $AGENT_DIR"
 echo "Node.js:      $NODE_PATH"
 echo "Servis kullanicisi: $SERVICE_USER"
+echo "agy:          ${AGY_PATH:-bulunamadi (AI_PROVIDERS ile codex kullanilabilir)}"
 echo "Servis:       $SERVICE_DIR/$SERVICE_NAME"
 echo ""
 
@@ -51,6 +58,7 @@ Wants=network-online.target
 Type=oneshot
 User=${SERVICE_USER}
 WorkingDirectory=${AGENT_DIR}
+${AGY_ENV_LINE}
 ExecStart=${NODE_PATH} ${AGENT_DIR}/src/index.js
 StandardOutput=append:${LOG_DIR}/stdout.log
 StandardError=append:${LOG_DIR}/stderr.log
