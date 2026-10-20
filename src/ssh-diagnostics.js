@@ -112,6 +112,8 @@ async function runRemoteCommand(sshArgs, cmd, maxChars, timeout) {
       : cleaned;
   } catch (err) {
     if (err.signal === 'SIGKILL') return `[TIMEOUT: ${timeout}s asimi]`;
+    if (err.exitCode === 255) return `[SSH_CONNECTION_ERROR: ${scrubSecrets(err.stderr || err.message).slice(0, maxChars)}]`;
+    if (err.exitCode != null) return `[SSH_CMD_ERROR: exit=${err.exitCode}] ${scrubSecrets((err.stdout || '') + (err.stderr || '')).slice(0, maxChars)}`;
     return `[SSH_CMD_ERROR: ${err.message.slice(0, 200)}]`;
   }
 }
@@ -171,7 +173,7 @@ async function diagnoseHost(hostInfo, config) {
     const output = await runRemoteCommand(sshFlags, cmd, max_output_chars, timeout_seconds);
     const elapsed = Date.now() - t0;
     // SSH connectivity failure (ConnectTimeout veya bizim SIGKILL timeout'u) — sonraki komutları deneme
-    if (output.startsWith('[stderr] ssh:') || output.startsWith('[TIMEOUT:')) {
+    if (output.startsWith('[SSH_CONNECTION_ERROR:') || output.startsWith('[stderr] ssh:') || output.startsWith('[TIMEOUT:')) {
       connectionDead = true;
     }
     dbg(`[SSH] ${host} → ${output.startsWith('[') ? output.split('\n')[0] : `OK (${elapsed}ms)`}`);

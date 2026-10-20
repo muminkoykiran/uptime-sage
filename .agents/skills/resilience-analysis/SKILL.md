@@ -14,7 +14,7 @@ Rule set and examples for analyzing monitor data the way an expert SRE team woul
 | Any service is DOWN | CRITICAL |
 | 3+ monitors flapping simultaneously | CRITICAL |
 | Any monitor flapping | WARNING |
-| Ping > 1000ms (sustained) | WARNING |
+| PENDING monitor | WARNING |
 | 24h uptime < 99% | WARNING |
 | 30d uptime < 99.9% | WARNING |
 | All services healthy and stable | OK |
@@ -25,9 +25,11 @@ When in doubt, always choose the higher severity.
 
 The `analyzeMonitors()` function in `src/analyzer.js`:
 1. Structures monitor data with `buildPrompt()`
-2. Runs analysis via `codex exec --json --sandbox read-only --output-schema`
-3. Parses the JSON response from the JSONL event stream
-4. Falls back to `buildFallbackAnalysis()` on failure
+2. Tries each provider from `AI_PROVIDERS` in order (default `agy,codex`; see `src/providers/`)
+3. Parses the structured JSON each provider returns (agy: `structured_output`, codex: JSONL / output file)
+4. Uses a persisted per-provider quota circuit (`state._ai`) after permanent failures, then falls back to deterministic analysis when every provider fails
+
+Ping/latency never affects severity.
 
 For the full rule set, see `references/severity-rules.md`.
 
@@ -67,6 +69,5 @@ Additional context can be added to the `buildPrompt()` function in `src/analyzer
 
 ## Model Selection
 
-The model is determined by the `model` setting in `~/.codex/config.toml`.
-This agent's `.codex/config.toml` defaults to `gpt-5.4`.
+Codex: model comes from `CODEX_MODEL` (default `gpt-5.6-terra`). agy: `AGY_MODEL` (default `gemini-3.8-flash-high`).
 `model_reasoning_effort = "high"` is active — analysis quality is the priority.

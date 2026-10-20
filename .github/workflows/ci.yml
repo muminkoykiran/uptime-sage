@@ -36,9 +36,12 @@ jobs:
 
       - name: Syntax check
         run: |
-          for f in src/*.js scripts/*.js .codex/hook-scripts/*.js .agents/skills/uptime-monitor/scripts/*.js; do
+          for f in src/*.js src/providers/*.js scripts/*.js .codex/hook-scripts/*.js .agents/skills/uptime-monitor/scripts/*.js; do
             [ -f "$f" ] && node --check "$f" && echo "OK: $f"
           done
 
       - name: Security audit
         run: npm audit --audit-level=high
+
+      - name: Offline behavior tests
+        run: npm test

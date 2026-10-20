@@ -41,12 +41,20 @@ function toUptimePercent(ratio) {
   return ratio != null ? Math.round(ratio * 1000) / 10 : null;
 }
 
-function computeUptime(parsedBeats, windowMinutes) {
-  if (!parsedBeats.length) return null;
-  const cutoff = Date.now() - windowMinutes * 60_000;
-  const recent = parsedBeats.filter(b => b.ts > cutoff);
-  if (!recent.length) return null;
-  return toUptimePercent(recent.filter(b => b.status === 1).length / recent.length);
+function computeUptimes(parsedBeats, now = Date.now()) {
+  const windows = [24 * 60, 30 * 24 * 60];
+  const counts = windows.map(() => ({ covered: false, total: 0, up: 0 }));
+  for (const beat of parsedBeats) {
+    for (const [index, minutes] of windows.entries()) {
+      const cutoff = now - minutes * 60_000;
+      if (beat.ts <= cutoff) counts[index].covered = true;
+      if (beat.ts > cutoff) {
+        counts[index].total++;
+        if (beat.status === 1) counts[index].up++;
+      }
+    }
+  }
+  return counts.map(count => count.covered && count.total > 0 ? toUptimePercent(count.up / count.total) : null);
 }
 
 // ─── Public HTTP (fallback, auth yok) ────────────────────────────────────────
@@ -74,10 +82,13 @@ export function connectSocketIO() {
     }
 
     const socket = io(BASE_URL(), {
+      autoConnect: false,
       transports: ['websocket'],
       reconnection: false,
       timeout: CONNECT_TIMEOUT,
     });
+    socket.monitorSnapshot = fetchAllMonitors(socket);
+    socket.monitorSnapshot.catch(() => {});
 
     const timer = setTimeout(() => {
       socket.disconnect();
@@ -106,10 +117,12 @@ export function connectSocketIO() {
         resolve(socket);
       });
     });
+    socket.connect();
   });
 }
 
 export function fetchAllMonitors(socket) {
+  if (socket.monitorSnapshot) return socket.monitorSnapshot;
   return new Promise((resolve, reject) => {
     const monitorList = {};
     const heartbeatList = {};
@@ -119,6 +132,10 @@ export function fetchAllMonitors(socket) {
 
     function finish() {
       if (settled) return;
+      if (Object.keys(monitorList).length === 0) {
+        rejectOnce(new Error('Monitor list missing or empty'));
+        return;
+      }
       settled = true;
       clearTimeout(waitTimer);
       clearTimeout(safetyTimer); // FIX: event loop serbest birakiliyor
@@ -170,6 +187,7 @@ export function parseSocketMonitors(monitorList, heartbeatList) {
     const latest = beats[beats.length - 1] || null;
     // FIX: timestamp parse'i once yapilir, computeUptime iki kez cagirsa da tek parse
     const parsedBeats = preParseTimestamps(beats);
+    const [uptime24h, uptime30d] = computeUptimes(parsedBeats);
     return {
       id: Number(id),
       name: monitor.name,
@@ -183,8 +201,8 @@ export function parseSocketMonitors(monitorList, heartbeatList) {
       ping: latest?.ping ?? null,
       msg: latest?.msg || '',
       time: latest?.time || null,
-      uptime24h: computeUptime(parsedBeats, 24 * 60),
-      uptime30d: computeUptime(parsedBeats, 30 * 24 * 60),
+      uptime24h,
+      uptime30d,
       recentStatuses: buildRecentStatuses(beats),
     };
   });
@@ -220,23 +238,22 @@ export function parsePublicMonitors(pageData) {
   return monitors;
 }
 
-export function aggregateStats(monitors) {
+export function aggregateStats(monitors, accessMode = process.env.UPTIME_KUMA_TOKEN ? 'socket.io+jwt' : 'public-http') {
   let up = 0, down = 0, pending = 0, maintenance = 0;
   let pingSum = 0, pingMax = 0, pingCount = 0;
   const downMonitors = [];
-  const slowMonitors = [];
+  const pendingMonitors = [];
 
   for (const m of monitors) {
     if (m.status === 1) up++;
     else if (m.status === 0) { down++; downMonitors.push(m.name); }
-    else if (m.status === 2) pending++;
+    else if (m.status === 2) { pending++; pendingMonitors.push(m.name); }
     else if (m.status === 3) maintenance++;
 
     if (m.ping != null) {
       pingSum += m.ping;
       if (m.ping > pingMax) pingMax = m.ping;
       pingCount++;
-      if (m.ping > 1000) slowMonitors.push(`${m.name} (${m.ping}ms)`);
     }
   }
 
@@ -249,7 +266,7 @@ export function aggregateStats(monitors) {
     avgPing, maxPing,
     healthScore: total === 0 ? 100 : Math.round((up / total) * 100),
     downMonitors,
-    slowMonitors,
-    accessMode: process.env.UPTIME_KUMA_TOKEN ? 'socket.io+jwt' : 'public-http',
+    pendingMonitors,
+    accessMode,
   };
 }

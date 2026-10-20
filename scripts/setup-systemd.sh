@@ -54,7 +54,8 @@ WorkingDirectory=${AGENT_DIR}
 ExecStart=${NODE_PATH} ${AGENT_DIR}/src/index.js
 StandardOutput=append:${LOG_DIR}/stdout.log
 StandardError=append:${LOG_DIR}/stderr.log
-SuccessExitStatus=0 1 2 3
+SuccessExitStatus=0 2
+TimeoutStartSec=15min
 
 [Install]
 WantedBy=multi-user.target

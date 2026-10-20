@@ -12,7 +12,7 @@ Any monitor DOWN?
 Any monitor flapping (>4 transitions in last 20 checks)?
   YES → WARNING
 
-Any ping permanently >1000ms?
+Any PENDING monitor? (ping/latency is ignored)
   YES → WARNING
 
 Any 24h uptime < 99%?
@@ -21,7 +21,7 @@ Any 24h uptime < 99%?
 Any 30d uptime < 99.9%?
   YES → WARNING
 
-All monitors UP, stable trend, normal ping?
+All monitors UP, stable trend, stable trend?
   → OK
 ```
 
@@ -60,7 +60,7 @@ Adjustments (applied by AI analysis):
 | Priority | Trigger | Example |
 |----------|---------|---------|
 | HIGH | DOWN monitor | Restart service, check logs |
-| MED | Flapping / slow ping | Investigate logs, check network |
+| MED | Flapping / PENDING | Investigate logs, check network |
 | LOW | Preventive | Capacity planning, alert tuning |
 
 ## Exit Code Behavior

@@ -1,28 +1,24 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 const STATE_PATH = join(import.meta.dirname, '..', 'data', 'state.json');
 
-export function loadState() {
+export function loadState(path = STATE_PATH) {
   try {
-    return JSON.parse(readFileSync(STATE_PATH, 'utf8'));
-  } catch {
-    return {};
+    const state = JSON.parse(readFileSync(path, 'utf8'));
+    if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('Invalid state');
+    return state;
+  } catch (err) {
+    if (err.code === 'ENOENT') return {};
+    throw err;
   }
 }
 
-let _dirEnsured = false;
-
-export function saveState(state) {
-  try {
-    if (!_dirEnsured) {
-      mkdirSync(dirname(STATE_PATH), { recursive: true });
-      _dirEnsured = true;
-    }
-    writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
-  } catch (err) {
-    console.warn('Warning: could not save state:', err.message);
-  }
+export function saveState(state, path = STATE_PATH) {
+  mkdirSync(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify(state, null, 2), { mode: 0o600 });
+  renameSync(temporary, path);
 }
 
 export function updateMonitorState(state, monitor) {
@@ -34,7 +30,7 @@ export function updateMonitorState(state, monitor) {
   let hoursSinceLastAlert = null;
 
   if (monitor.status === 0) {
-    if (!prev || prev.status !== 0) {
+    if (!prev || !prev.firstDownAt) {
       state[key] = {
         id: monitor.id,
         name: monitor.name,
@@ -50,7 +46,7 @@ export function updateMonitorState(state, monitor) {
         (Date.now() - new Date(prev.lastAlertAt).getTime()) / 3_600_000;
       state[key] = { ...prev, lastSeenAt: now };
     }
-  } else if (monitor.status === 1 && prev && prev.status === 0) {
+  } else if (monitor.status === 1 && prev?.firstDownAt) {
     isRecovered = true;
     delete state[key];
   } else {
