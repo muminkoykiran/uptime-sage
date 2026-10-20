@@ -11,9 +11,10 @@ AGENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_PATH="$(command -v node || echo '/usr/local/bin/node')"
 LOG_FILE="$HOME/.uptime-resilience-agent.log"
 CODEX_DEFAULT_PATH=$(command -v codex || echo "codex")
+AGY_DEFAULT_PATH=$(command -v agy || echo "agy")
 
 CRON_TAG="uptime-resilience-agent"
-CRON_LINE="0 * * * * cd \"${AGENT_DIR}\" && CODEX_BIN=${CODEX_DEFAULT_PATH} ${NODE_PATH} src/index.js >> ${LOG_FILE} 2>&1 # ${CRON_TAG}"
+CRON_LINE="0 * * * * cd \"${AGENT_DIR}\" && AGY_BIN=${AGY_DEFAULT_PATH} CODEX_BIN=${CODEX_DEFAULT_PATH} ${NODE_PATH} src/index.js >> ${LOG_FILE} 2>&1 # ${CRON_TAG}"
 
 echo "Proje dizini: $AGENT_DIR"
 echo "Node.js: $NODE_PATH"

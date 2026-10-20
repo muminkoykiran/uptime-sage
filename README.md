@@ -1,6 +1,6 @@
 # Uptime Resilience Agent
 
-Codex CLI tabanli Uptime Kuma resilience izleme ajani. Her saat Uptime Kuma durumunu analiz eder, uzman SRE perspektifinden Telegram bildirimi gonderir.
+agy/Codex CLI tabanli Uptime Kuma resilience izleme ajani (varsayilan zincir: agy → codex → kurali analiz; `AI_PROVIDERS` ile degistirilir). Her saat Uptime Kuma durumunu analiz eder, uzman SRE perspektifinden Telegram bildirimi gonderir.
 
 ## Mimari
 
@@ -78,7 +78,8 @@ node scripts/get-jwt-token.js <username> <password>
 **Ubuntu / Linux (systemd — onerilen):**
 
 ```bash
-bash scripts/setup-systemd.sh
+sudo bash scripts/setup-systemd.sh
+sudo bash scripts/setup-logrotate.sh
 ```
 
 **macOS (LaunchAgent):**
@@ -167,10 +168,10 @@ uptime-sage/
     telegram-dispatch/             # Telegram bildirim skill
   .codex/
     config.toml                    # Codex proje konfigurasyonu
-    hooks.json                     # SessionStart / Stop hooks
-    hook-scripts/                  # Hook implementasyonlari
+    hooks.json                     # Codex lifecycle hook ayarlari
   scripts/
     setup-systemd.sh               # Ubuntu/Linux systemd zamanlama
+    setup-logrotate.sh             # systemd log dosyasi rotasyonu
     setup-launchd.sh               # macOS saatlik zamanlama
     setup-cron.sh                  # Cron zamanlama (evrensel)
     get-jwt-token.js               # Uptime Kuma JWT token alma
@@ -190,13 +191,15 @@ uptime-sage/
 
 CI/CD entegrasyonu icin exit code kullanilabilir.
 
-## Log Takibi
+## Operasyon ve Log Takibi
 
 **Ubuntu / Linux (systemd):**
 
 ```bash
-tail -f ~/.local/log/uptime-resilience-agent/stdout.log
-tail -f ~/.local/log/uptime-resilience-agent/stderr.log
+tail -f /var/log/uptime-resilience-agent/stdout.log
+tail -f /var/log/uptime-resilience-agent/stderr.log
+systemctl status uptime-resilience-agent.timer
+systemctl status uptime-resilience-agent.service
 ```
 
 **macOS (LaunchAgent):**
@@ -205,6 +208,26 @@ tail -f ~/.local/log/uptime-resilience-agent/stderr.log
 tail -f ~/Library/Logs/uptime-resilience-agent/stdout.log
 tail -f ~/Library/Logs/uptime-resilience-agent/stderr.log
 ```
+
+`--dry` Uptime Kuma ve istege bagli SSH tanilamasi calistirir; Telegram ve
+kalici alert state yazimini atlar. Yerel regresyon kontrolleri icin `npm test`
+calistirin. Codex analizi kullanilamazsa kuralli analiz raporu nedenini belirtir;
+kota, model veya yetki hatalari kalici state'e yazilir ve hata reset zamani ya da
+`CODEX_FAILURE_BACKOFF_MINUTES` dolana kadar tekrar denenmez. Socket.IO gecici
+olarak ulasilamazsa public HTTP verisi kullanilir; bu kismi modda recovery ve
+monitor state'i degistirilmez.
+ChatGPT ile giris yapan hesaplarda analyzer varsayilan olarak `gpt-5.6-terra`
+kullanir; gerekirse desteklenen baska bir model icin `.env` icinde
+`CODEX_MODEL` ayarlayin.
+
+Eski lifecycle hook'lari bulunan kopyalarda hook'un ikinci bir Telegram mesaji
+gondermesini engellemek icin bir kez `bash scripts/apply-protected-agent-config.sh`
+calistirin. Script sadece `.codex/hooks.json` dosyasini degistirir ve once patch'i
+dogrular.
+
+systemd unit'i uygulama hatalarini basarisiz calisma sayar; `CRITICAL` durumlar
+exit code `2` ile biter. Unit dosyasini yenilemek icin kurulum scriptini tekrar
+calistirin, ardindan `systemctl daemon-reload` uygulanir.
 
 ## Genisleme Plani
 

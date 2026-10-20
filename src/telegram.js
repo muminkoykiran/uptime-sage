@@ -23,7 +23,9 @@ async function sendChunk(botToken, chatId, text, parseMode) {
 
   // Retry on 429 (rate limit)
   if (res.status === 429) {
-    const retryAfter = parseInt(res.headers.get('Retry-After') || '5', 10);
+    const body = await res.clone().json().catch(() => ({}));
+    const retryAfter = Number(body.parameters?.retry_after ?? res.headers.get('Retry-After') ?? 5);
+    if (!Number.isFinite(retryAfter) || retryAfter < 0 || retryAfter > 60) return res;
     await sleep(retryAfter * 1000);
     res = await doFetch();
   }

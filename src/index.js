@@ -8,6 +8,12 @@
  */
 
 import { loadEnv, requireEnv } from './env.js';
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+import { acquireLock } from './lock.js';
+import { assessHealth, shouldNotifyHealth, decideNotification } from './health.js';
+import { configureLogger, logOperational } from './logger.js';
+import { collectRuntimeHealth } from './runtime-health.js';
 import {
   connectSocketIO,
   fetchAllMonitors,
@@ -17,7 +23,7 @@ import {
   parsePublicMonitors,
   aggregateStats,
 } from './uptime.js';
-import { analyzeMonitors } from './analyzer.js';
+import { analyzeMonitors, resolveProviders } from './analyzer.js';
 import { collectDiagnostics } from './ssh-diagnostics.js';
 import { sendMessage, sendErrorAlert, getChatIdForSeverity } from './telegram.js';
 import { loadState, saveState, updateMonitorState, shouldAlert, recordRepeatAlert } from './state.js';
@@ -29,15 +35,15 @@ const isDebug = process.argv.includes('--debug');
 const hasToken = Boolean(process.env.UPTIME_KUMA_TOKEN);
 
 const TIMEZONE = process.env.TIMEZONE || 'UTC';
+configureLogger({ timeZone: TIMEZONE });
 
 function log(msg) {
-  const now = new Date().toLocaleTimeString('tr-TR', { timeZone: TIMEZONE });
-  console.log(`[${now}] ${msg}`);
+  logOperational(msg);
 }
 
 function debug(label, data) {
   if (!isDebug) return;
-  console.log(`\n[DEBUG] ${label}:\n`, JSON.stringify(data, null, 2));
+  log(`[DEBUG] ${label}: ${JSON.stringify(data)}`);
 }
 
 async function fetchMonitorsViaSocket() {
@@ -47,13 +53,13 @@ async function fetchMonitorsViaSocket() {
     const { monitorList, heartbeatList } = await fetchAllMonitors(socket);
     const monitors = parseSocketMonitors(monitorList, heartbeatList);
     log(`Socket.IO: ${monitors.length} monitor alindi (aktif+pasif tumu)`);
-    return monitors;
+    return { monitors, accessMode: 'socket.io+jwt', isPartial: false };
   } finally {
     socket.disconnect();
   }
 }
 
-async function fetchMonitorsViaHttp() {
+async function fetchMonitorsViaHttp(accessMode = 'public-http') {
   log('Public HTTP API kullaniliyor (sadece public monitorler)...');
   let slugs = ['default'];
 
@@ -80,10 +86,76 @@ async function fetchMonitorsViaHttp() {
 
   // Tekrarlari temizle (ayni monitor birden fazla sayfada olabilir)
   const seen = new Set();
-  return allMonitors.filter(m => { const nid = Number(m.id); return seen.has(nid) ? false : seen.add(nid); });
+  const monitors = allMonitors.filter(m => { const nid = Number(m.id); return seen.has(nid) ? false : seen.add(nid); });
+  return { monitors, accessMode, isPartial: true };
 }
 
-async function run() {
+function isSocketTransportError(err) {
+  return /Socket\.IO|Monitor list missing or empty|baglanti zaman asimi/i.test(err?.message || '');
+}
+
+function higherSeverity(a, b) {
+  const rank = { OK: 0, WARNING: 1, CRITICAL: 2 };
+  return rank[a] >= rank[b] ? a : b;
+}
+
+function shouldNotifyTransport(source, previous, nowMs, repeatMs, severity) {
+  if (!previous || previous.accessMode !== source.accessMode) return true;
+  if (higherSeverity(severity, previous.severity || 'OK') !== (previous.severity || 'OK')) return true;
+  return severity !== 'OK' && nowMs - (previous.sentAt || 0) >= repeatMs;
+}
+
+function shouldNotifyRuntime(current, previous, nowMs, repeatMs) {
+  if (!previous) return current.severity !== 'OK';
+  if (current.severity !== previous.severity) return true;
+  return current.severity !== 'OK' && nowMs - (previous.sentAt || 0) >= repeatMs;
+}
+
+function applyAiOutcomes(state, outcomes = []) {
+  for (const outcome of outcomes) {
+    if (outcome.status === 'success') delete state._ai?.[outcome.provider];
+    if (outcome.status === 'open') {
+      state._ai = { ...state._ai, [outcome.provider]: { retryAt: outcome.retryAt, reason: outcome.reason, openedAt: Date.now() } };
+    }
+  }
+  if (state._ai && Object.keys(state._ai).length === 0) delete state._ai;
+}
+
+// Eski tek-sağlayıcılı state'i (state._codex) bir kez yeni şemaya taşır.
+function migrateLegacyCircuit(state) {
+  if (!state._codex) return;
+  state._ai = { ...state._ai, codex: state._codex };
+  delete state._codex;
+}
+
+function recordNotified(state, source, health, runtimeHealth) {
+  if (!source.isPartial) state._health = { ...health, sentAt: Date.now() };
+  state._transport = { accessMode: source.accessMode, isPartial: source.isPartial, severity: health.severity, sentAt: Date.now() };
+  state._runtimeHealth = { severity: runtimeHealth.severity, sentAt: Date.now() };
+}
+
+function buildRecoveryMessage(recoveries, timestamp) {
+  return [`✅ *RECOVERY* | ${timestamp}`, '', ...recoveries.map(name => `• *${name}* tekrar UP`)].join('\n');
+}
+
+function addOperationalContext(message, source, runtimeHealth) {
+  const context = [];
+  if (source.isPartial) {
+    context.push('⚠️ *Veri erişimi*: Socket.IO kullanılamıyor; yalnızca public monitor verisi gösteriliyor. Recovery state güncellenmedi.');
+  }
+  if (runtimeHealth.issues.length > 0) {
+    const icon = runtimeHealth.severity === 'CRITICAL' ? '🚨' : '⚠️';
+    context.push(`${icon} *Ajan kaynağı*: ${runtimeHealth.issues.join('; ')}`);
+  }
+  return context.length ? `${message}\n\n${context.join('\n')}` : message;
+}
+
+function alignMessageSeverity(message, severity) {
+  const icon = { OK: '🟢', WARNING: '🟡', CRITICAL: '🔴' }[severity] || '🟡';
+  return message.replace(/^(?:🟢 OK|🟡 WARNING|🔴 CRITICAL)(?= \|)/, `${icon} ${severity}`);
+}
+
+export async function run() {
   const startMs = Date.now();
   const timestamp = new Date().toLocaleString('tr-TR', {
     timeZone: TIMEZONE,
@@ -97,19 +169,27 @@ async function run() {
   try {
     requireEnv(['UPTIME_KUMA_URL', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']);
   } catch (err) {
-    console.error(err.message);
-    process.exit(1);
+    log(err.message);
+    return 1;
   }
 
   try {
     // 1. Monitor verisini al
-    let monitors;
+    let source;
     if (hasToken) {
-      monitors = await fetchMonitorsViaSocket();
+      try {
+        source = await fetchMonitorsViaSocket();
+      } catch (err) {
+        if (!isSocketTransportError(err)) throw err;
+        log(`Socket.IO gecici hatasi: ${err.message}; public HTTP yedegi kullaniliyor`);
+        source = await fetchMonitorsViaHttp('public-http-fallback');
+      }
     } else {
       log('Ipucu: JWT ile tum monitorlere erisebilirsin → node scripts/get-jwt-token.js');
-      monitors = await fetchMonitorsViaHttp();
+      source = await fetchMonitorsViaHttp();
     }
+
+    let monitors = source.monitors;
 
     monitors = monitors.filter(m => m.active !== false);
 
@@ -119,31 +199,76 @@ async function run() {
 
     // State tracking
     const state = loadState();
+    migrateLegacyCircuit(state);
     const recoveries = [];
     let needsAlert = false;
+    const repeatMs = (Number(process.env.ALERT_REPEAT_HOURS) || 4) * 3_600_000;
 
-    for (const m of monitors) {
-      const result = updateMonitorState(state, m);
-      if (result.isRecovered) {
-        log(`[RECOVERY] ${m.name} UP`);
-        recoveries.push(m.name);
-        needsAlert = true;
+    if (!source.isPartial) {
+      for (const m of monitors) {
+        const result = updateMonitorState(state, m);
+        if (result.isRecovered) {
+          log(`[RECOVERY] ${m.name} UP`);
+          recoveries.push(m.name);
+          needsAlert = true;
+        }
+        if (shouldAlert(result)) {
+          needsAlert = true;
+          if (!result.isNewDown) recordRepeatAlert(state, m.id);
+        }
       }
-      if (shouldAlert(result)) {
-        needsAlert = true;
-        if (!result.isNewDown) recordRepeatAlert(state, m.id);
-      }
+    } else {
+      log(`Kismi veri modu: ${source.accessMode}; monitor state ve recovery yazilmayacak`);
     }
 
-    const stats = aggregateStats(monitors);
-    log(`${monitors.length} monitor | UP: ${stats.up} | DOWN: ${stats.down} | Saglik: ${stats.healthScore}/100`);
+    const stats = aggregateStats(monitors, source.accessMode);
+    const runtimeHealth = collectRuntimeHealth();
+    log(`${monitors.length} monitor | UP: ${stats.up} | DOWN: ${stats.down} | PENDING: ${stats.pending} | MAINTENANCE: ${stats.maintenance} | Saglik: ${stats.healthScore}/100 | Kaynak: ${source.accessMode}`);
+    if (runtimeHealth.issues.length > 0) log(`[RUNTIME] ${runtimeHealth.issues.join('; ')}`, runtimeHealth.severity === 'CRITICAL' ? 'error' : 'warn');
     debug('stats', stats);
+    debug('runtime', runtimeHealth);
 
-    if (!needsAlert) {
-      log('Hicbir degisiklik yok, Telegram atlanıyor');
+    const monitorHealth = assessHealth(monitors);
+    const health = {
+      ...monitorHealth,
+      severity: higherSeverity(monitorHealth.severity, runtimeHealth.severity),
+      fingerprint: `${monitorHealth.fingerprint}|runtime:${runtimeHealth.severity}`,
+    };
+    const previousHealth = state._health;
+    if (source.isPartial) {
+      if (shouldNotifyTransport(source, state._transport, Date.now(), repeatMs, health.severity)) needsAlert = true;
+    } else {
+      if (shouldNotifyHealth(health, previousHealth, Date.now(), repeatMs)) needsAlert = true;
+      if (state._transport?.isPartial) {
+        log('Tam Socket.IO verisi geri geldi');
+        needsAlert = true;
+      }
+    }
+    if (shouldNotifyRuntime(runtimeHealth, state._runtimeHealth, Date.now(), repeatMs)) needsAlert = true;
+
+    const decision = decideNotification({ severity: health.severity, recoveries, isPartial: source.isPartial, needsAlert });
+    debug('decision', { decision, severity: health.severity, needsAlert });
+
+    // --dry her zaman tam analiz yolunu calistirir (dogrulama icin); karar sadece loglanir.
+    if (isDry && decision !== 'full') log(`[DRY] Karar: ${decision} (production'da Telegram gonderilmez/kisa gonderilir)`);
+
+    if (decision === 'skip' && !isDry) {
+      log(needsAlert ? 'Durum OK, Telegram atlanıyor' : 'Hicbir degisiklik yok, Telegram atlanıyor');
+      // Severity OK'e dondu: state'i guncelle ki sonraki WARNING bastirilmasin.
+      if (needsAlert) recordNotified(state, source, health, runtimeHealth);
       saveState(state);
       log(`Agent tamamlandi (${Date.now() - startMs}ms)`);
-      return;
+      return 0;
+    }
+
+    if (decision === 'recovery' && !isDry) {
+      const recoveryMessage = buildRecoveryMessage(recoveries, timestamp);
+      await sendMessage(recoveryMessage, 'Markdown', { chatId: getChatIdForSeverity('OK') });
+      log('Recovery bildirimi gonderildi');
+      recordNotified(state, source, health, runtimeHealth);
+      saveState(state);
+      log(`Agent tamamlandi (${Date.now() - startMs}ms)`);
+      return 0;
     }
 
     // 2. SSH diagnostics (SSH_DIAGNOSTICS_ENABLED=true ise, DOWN/PENDING monitor'ler icin)
@@ -159,9 +284,19 @@ async function run() {
       log(`SSH diagnostics tamamlandi: ${ok} host ok, ${err} host hatali`);
     }
 
-    // 3. Codex CLI ile AI analizi
-    log('Codex CLI analiz yapiliyor...');
-    const analysis = await analyzeMonitors(monitors, stats, timestamp, TIMEZONE, diagnostics);
+    // 3. AI CLI saglayici zinciri ile analiz (agy → codex → kurali analiz)
+    const providers = resolveProviders();
+    log(`AI analizi yapiliyor (${providers.map(p => p.name).join(' → ') || 'saglayici yok'})...`);
+    const analysis = await analyzeMonitors(monitors, stats, timestamp, TIMEZONE, diagnostics, {
+      providers,
+      circuits: state._ai,
+      runtimeHealth,
+    });
+    const severityRank = { OK: 0, WARNING: 1, CRITICAL: 2 };
+    if (severityRank[analysis.severity] < severityRank[health.severity]) {
+      analysis.severity = health.severity;
+      analysis.telegramMessage = alignMessageSeverity(analysis.telegramMessage, health.severity);
+    }
     debug('analysis', analysis);
 
     log(`Analiz tamam — Severity: ${analysis.severity} | Score: ${analysis.healthScore}/100`);
@@ -174,7 +309,7 @@ async function run() {
     }
 
     // Prepend recovery info to message if any
-    let message = analysis.telegramMessage;
+    let message = addOperationalContext(analysis.telegramMessage, source, runtimeHealth);
     if (recoveries.length > 0) {
       const recoveryText = recoveries.map(n => `[RECOVERY] ${n} UP`).join('\n');
       message = recoveryText + '\n\n' + message;
@@ -191,27 +326,41 @@ async function run() {
       log('Telegram bildirimi gonderildi');
     }
 
-    saveState(state);
+    if (!isDry) {
+      recordNotified(state, source, health, runtimeHealth);
+      applyAiOutcomes(state, analysis._aiOutcomes);
+      saveState(state);
+    }
 
-    if (analysis.detailedReport) {
-      log('\n--- DETAYLI TEKNIK RAPOR ---');
-      console.log(analysis.detailedReport);
+    if (isDebug && analysis.detailedReport) {
+      for (const line of analysis.detailedReport.split('\n')) log(`[DEBUG] RAPOR ${line}`);
     }
 
     log(`Agent tamamlandi (${Date.now() - startMs}ms)`);
 
-    if (analysis.severity?.toUpperCase() === 'CRITICAL') process.exit(2);
+    return analysis.severity?.toUpperCase() === 'CRITICAL' ? 2 : 0;
 
   } catch (err) {
     log(`HATA: ${err.message}`);
-    if (isDebug) console.error(err.stack);
+    if (isDebug && err.stack) log(`[DEBUG] ${err.stack}`, 'error');
 
     if (!isDry) {
       await sendErrorAlert(err.message, timestamp).catch(() => {});
     }
 
-    process.exit(1);
+    return 1;
   }
 }
 
-run();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  let release;
+  try {
+    if (!isDry) release = acquireLock(join(import.meta.dirname, '..', 'data', 'run.lock'));
+    process.exitCode = (await run()) || 0;
+  } catch (err) {
+    log(`HATA: ${err.message}`);
+    process.exitCode = 1;
+  } finally {
+    release?.();
+  }
+}
